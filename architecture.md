@@ -1,38 +1,29 @@
-Kyverno MCP Server Architecture
-1. Overview
+# Kyverno MCP Server Architecture
+
+## 1. Overview
 This document outlines the architecture for a Management Control Plane (MCP) server for Kyverno. The primary goal of this server is to expose Kyverno's policy application capabilities over MCP, allowing clients to apply Kyverno policies to a given set of Kubernetes resources and receive the results. This is analogous to the Kyverno CLI's apply command.
 
 The server will be implemented in Golang, utilizing the mark3labs/mcp-go library for MCP communication.
 
-2. Goals
-Provide an MCP endpoint to apply Kyverno policies to Kubernetes resources.
+## 2. Goals
+- Provide an MCP endpoint to apply Kyverno policies to Kubernetes resources.
+- Support loading policies from various sources (e.g., local file paths, potentially URLs in the future).
+- Support loading Kubernetes resources exclusively via the Kubernetes API.
+- The server must be able to run in-cluster (authenticating via a service account).
+- The server must be able to run out-of-cluster (authenticating via a kubeconfig file specified by a parameter).
+- Allow specification of common kyverno apply parameters like valuesFile, userInfo, etc.
+- Return detailed results of policy application, including validations, mutations, and errors.
+- Leverage Kyverno's core libraries for policy evaluation.
 
-Support loading policies from various sources (e.g., local file paths, potentially URLs in the future).
+## 3. Non-Goals (for initial version)
+- Full real-time policy enforcement or admission control (this is the domain of the main Kyverno deployment).
+- Loading Kubernetes resources directly from local files or URLs via the MCP request. (Resources are always fetched from the K8s API based on query parameters).
+- Support for all Kyverno CLI features initially (e.g., complex Git interactions, interactive prompts).
+- Advanced UI or dashboard (the focus is on the MCP backend).
+- Generating policies (focus is on applying existing policies).
 
-Support loading Kubernetes resources exclusively via the Kubernetes API.
-
-The server must be able to run in-cluster (authenticating via a service account).
-
-The server must be able to run out-of-cluster (authenticating via a kubeconfig file specified by a parameter).
-
-Allow specification of common kyverno apply parameters like valuesFile, userInfo, etc.
-
-Return detailed results of policy application, including validations, mutations, and errors.
-
-Leverage Kyverno's core libraries for policy evaluation.
-
-3. Non-Goals (for initial version)
-Full real-time policy enforcement or admission control (this is the domain of the main Kyverno deployment).
-
-Loading Kubernetes resources directly from local files or URLs via the MCP request. (Resources are always fetched from the K8s API based on query parameters).
-
-Support for all Kyverno CLI features initially (e.g., complex Git interactions, interactive prompts).
-
-Advanced UI or dashboard (the focus is on the MCP backend).
-
-Generating policies (focus is on applying existing policies).
-
-4. High-Level Architecture Diagram
+## 4. High-Level Architecture Diagram
+```
 +-------------------+      MCP (ApplyRequest)      +------------------------+
 |    MCP Client     | <--------------------------> |  Kyverno MCP Server    |
 | (e.g., CLI, UI)   |                              |  (Golang, mcp-go)      |
@@ -44,10 +35,12 @@ Generating policies (focus is on applying existing policies).
                                            |   Kyverno Core Libraries  | <---------> Kubernetes Cluster
                                            | (Policy Engine, Loaders)  |
                                            +---------------------------+
+```
 
-5. File and Folder Structure
+## 5. File and Folder Structure
 A suggested project structure:
 
+```
 kyverno-mcp-server/
 ├── cmd/
 │   └── kyverno-mcp-server/
@@ -82,11 +75,14 @@ kyverno-mcp-server/
 ├── go.mod
 ├── go.sum
 └── README.md
+```
 
-6. Key Packages and Interfaces
-6.1. pkg/mcp/types/apply.go
+## 6. Key Packages and Interfaces
+
+### 6.1. pkg/mcp/types/apply.go
 Defines the Go structs for MCP messages.
 
+```go
 package types
 
 import (
@@ -147,16 +143,18 @@ type RuleResult struct {
     Message string `json:"message"`
     Status  string `json:"status"`
 }
+```
 
-6.2. pkg/mcp/server.go
+### 6.2. pkg/mcp/server.go
 (No change in description from previous versions)
 
-6.3. pkg/mcp/handler.go (or apply_handler.go)
+### 6.3. pkg/mcp/handler.go (or apply_handler.go)
 (No change in Go code structure from previous versions, but the req *types.ApplyRequest will have the updated fields)
 
-6.4. pkg/kyverno/engine.go
+### 6.4. pkg/kyverno/engine.go
 Interface and implementation for the core Kyverno logic.
 
+```go
 package kyverno
 
 import (
@@ -227,10 +225,12 @@ func (ke *kyvernoEngine) ApplyPolicies(ctx context.Context, req *types.ApplyRequ
     // ... rest of the logic ...
     return resp, nil
 }
+```
 
-6.5. pkg/kyverno/policy_loader.go
+### 6.5. pkg/kyverno/policy_loader.go
 (No change in description or Go code structure from the original version focusing on local file paths for policies. Git/Kustomize support would be future enhancements as per previous iterations if desired.)
 
+```go
 package kyverno
 
 import (
@@ -253,8 +253,10 @@ func (l *localPolicyLoader) Load(policyPaths []string, gitBranch string) ([]kyve
     var policies []kyvernov1.PolicyInterface
     return policies, nil
 }
+```
 
-6.6. pkg/kyverno/resource_loader.go
+### 6.6. pkg/kyverno/resource_loader.go
+```go
 package kyverno
 
 import (
@@ -335,8 +337,10 @@ func (arl *apiResourceLoader) Load(ctx context.Context, queries []types.Resource
 
     return allResources, nil
 }
+```
 
-6.7. pkg/utils/k8s.go (Conceptual Content)
+### 6.7. pkg/utils/k8s.go (Conceptual Content)
+```go
 package k8s
 
 import (
@@ -375,7 +379,6 @@ func GetRESTMapper(kubeconfigPath string) (meta.RESTMapper, error) {
     return nil, nil // Placeholder
 }
 
-
 // GVKToGVR maps GroupVersionKind to GroupVersionResource.
 // This requires a RESTMapper.
 func GVKToGVR(apiVersion, kind string) (schema.GroupVersionResource, error) {
@@ -405,108 +408,90 @@ func GVKToGVR(apiVersion, kind string) (schema.GroupVersionResource, error) {
     // ... add more common types or implement full RESTMapper lookup
     return schema.GroupVersionResource{}, fmt.Errorf("GVK %s not mapped to GVR (implement RESTMapper)", gvk.String())
 }
+```
 
+## 7. Component Breakdown
 
-7. Component Breakdown
-cmd/kyverno-mcp-server/main.go:
+### cmd/kyverno-mcp-server/main.go:
+- Parses command-line arguments, including a `--kubeconfig` flag (optional, for out-of-cluster).
+- Initializes dependencies. The kyvernoEngine will be initialized with the kubeconfig path from the flag.
+- Creates and starts the MCP server.
 
-Parses command-line arguments, including a --kubeconfig flag (optional, for out-of-cluster).
+### pkg/mcp/server.go: 
+(No change in description)
 
-Initializes dependencies. The kyvernoEngine will be initialized with the kubeconfig path from the flag.
+### pkg/mcp/apply_handler.go: 
+(No change in description)
 
-Creates and starts the MCP server.
+### pkg/kyverno/engine.go:
+- Orchestrates policy application.
+- Determines the effective kubeconfig path (request-specific or server default) to pass to the ResourceLoader.
+- Uses PolicyLoader for policies and the updated ResourceLoader for resources from K8s API.
 
-pkg/mcp/server.go: (No change in description)
+### pkg/kyverno/policy_loader.go: 
+(No change in core responsibility for loading policies from paths)
 
-pkg/mcp/apply_handler.go: (No change in description)
+### pkg/kyverno/resource_loader.go:
+- New Role: Responsible for fetching Kubernetes resources directly from the Kubernetes API.
+- Uses a Kubernetes dynamic client.
+- Handles in-cluster and out-of-cluster client configuration based on kubeconfigPath.
+- Fetches resources based on ResourceQuery criteria.
 
-pkg/kyverno/engine.go:
+### pkg/config/config.go:
+- May store the server's default kubeconfig path if provided via CLI flag.
 
-Orchestrates policy application.
+### pkg/utils/k8s.go:
+- Enhanced Role: Provides crucial utilities for Kubernetes client creation (dynamic client, potentially RESTMapper for GVK-to-GVR conversion). 
+- Handles logic for in-cluster vs. out-of-cluster configuration.
 
-Determines the effective kubeconfig path (request-specific or server default) to pass to the ResourceLoader.
+## 8. Workflow (ApplyRequest)
+1. Client Request: An MCP client constructs an ApplyRequest (including PolicyPaths, ResourceQueries, and optionally KubeconfigPath) and sends it.
+2. MCP Server Receives: Routes to ApplyService.
+3. Handler Invocation: ApplyService.ProcessApplyRequest is called.
+4. Policy Loading: The kyvernoEngine (via PolicyLoader) loads policies from req.PolicyPaths.
+5. Determine Kubeconfig: The kyvernoEngine determines the effective kubeconfig path (request-specific req.KubeconfigPath, server default, or empty for in-cluster).
+6. Resource Loading (K8s API): The kyvernoEngine (via ResourceLoader) uses the determined kubeconfig to connect to the Kubernetes API and fetches resources matching req.ResourceQueries.
+7. Context Preparation: User info, values, and context variables are prepared.
+8. Kyverno Engine Execution: Policies are applied to the fetched resources.
+9. Response Transformation: Engine responses are transformed.
+10. MCP Response Construction: ApplyResponse is assembled.
+11. Client Receives Response: The server sends the ApplyResponse.
 
-Uses PolicyLoader for policies and the updated ResourceLoader for resources from K8s API.
-
-pkg/kyverno/policy_loader.go: (No change in core responsibility for loading policies from paths)
-
-pkg/kyverno/resource_loader.go:
-
-New Role: Responsible for fetching Kubernetes resources directly from the Kubernetes API.
-
-Uses a Kubernetes dynamic client.
-
-Handles in-cluster and out-of-cluster client configuration based on kubeconfigPath.
-
-Fetches resources based on ResourceQuery criteria.
-
-pkg/config/config.go:
-
-May store the server's default kubeconfig path if provided via CLI flag.
-
-pkg/utils/k8s.go:
-
-Enhanced Role: Provides crucial utilities for Kubernetes client creation (dynamic client, potentially RESTMapper for GVK-to-GVR conversion). Handles logic for in-cluster vs. out-of-cluster configuration.
-
-8. Workflow (ApplyRequest)
-Client Request: An MCP client constructs an ApplyRequest (including PolicyPaths, ResourceQueries, and optionally KubeconfigPath) and sends it.
-
-MCP Server Receives: Routes to ApplyService.
-
-Handler Invocation: ApplyService.ProcessApplyRequest is called.
-
-Policy Loading: The kyvernoEngine (via PolicyLoader) loads policies from req.PolicyPaths.
-
-Determine Kubeconfig: The kyvernoEngine determines the effective kubeconfig path (request-specific req.KubeconfigPath, server default, or empty for in-cluster).
-
-Resource Loading (K8s API): The kyvernoEngine (via ResourceLoader) uses the determined kubeconfig to connect to the Kubernetes API and fetches resources matching req.ResourceQueries.
-
-Context Preparation: User info, values, and context variables are prepared.
-
-Kyverno Engine Execution: Policies are applied to the fetched resources.
-
-Response Transformation: Engine responses are transformed.
-
-MCP Response Construction: ApplyResponse is assembled.
-
-Client Receives Response: The server sends the ApplyResponse.
-
-9. API (MCP Interactions)
+## 9. API (MCP Interactions)
 (No change in description, but ApplyRequest structure has changed as noted in 6.1)
 
-10. Error Handling and Logging
+## 10. Error Handling and Logging
 (No change in description, but error handling for K8s API interactions is critical)
 
-11. Implementation Details & Kyverno Integration
-Kyverno Dependencies: (No change in list)
+## 11. Implementation Details & Kyverno Integration
 
-Kubernetes Client Libraries:
+### Kyverno Dependencies: 
+(No change in list)
 
-k8s.io/client-go/dynamic for interacting with arbitrary resource types.
+### Kubernetes Client Libraries:
+- `k8s.io/client-go/dynamic` for interacting with arbitrary resource types.
+- `k8s.io/client-go/tools/clientcmd` for loading kubeconfig files.
+- `k8s.io/client-go/rest` for in-cluster configuration.
+- `k8s.io/apimachinery/pkg/runtime/schema` for GVK/GVR.
+- `k8s.io/client-go/discovery` and `k8s.io/client-go/restmapper` for GVK to GVR mapping.
 
-k8s.io/client-go/tools/clientcmd for loading kubeconfig files.
+### Resource Loading: 
+The ResourceLoader must robustly handle Kubernetes API interactions, including:
+- Authentication (in-cluster service account or kubeconfig)
+- GVK to GVR mapping (using a RESTMapper)
+- Fetching single or multiple resources
 
-k8s.io/client-go/rest for in-cluster configuration.
+### Configuration: 
+The main.go in cmd/kyverno-mcp-server should use the flag package to accept a `--kubeconfig` command-line argument. This path (or an empty string if not provided for in-cluster) should be passed when initializing the kyvernoEngine.
 
-k8s.io/apimachinery/pkg/runtime/schema for GVK/GVR.
+### RBAC: 
+The service account (if in-cluster) or the user in kubeconfig (if out-of-cluster) needs appropriate RBAC permissions (get, list, watch) for the resources specified in ResourceQueries across the target namespaces.
 
-k8s.io/client-go/discovery and k8s.io/client-go/restmapper for GVK to GVR mapping.
-
-Resource Loading: The ResourceLoader must robustly handle Kubernetes API interactions, including authentication (in-cluster service account or kubeconfig), GVK to GVR mapping (using a RESTMapper), and fetching single or multiple resources.
-
-Configuration: The main.go in cmd/kyverno-mcp-server should use the flag package to accept a --kubeconfig command-line argument. This path (or an empty string if not provided for in-cluster) should be passed when initializing the kyvernoEngine.
-
-RBAC: The service account (if in-cluster) or the user in kubeconfig (if out-of-cluster) needs appropriate RBAC permissions (get, list, watch) for the resources specified in ResourceQueries across the target namespaces.
-
-12. Future Considerations
-Advanced Resource Queries: Support more complex query mechanisms if needed.
-
-Policy Loading from Git/Kustomize: Re-introduce if policies also need to be sourced dynamically (as per previous iterations of this document).
-
-Caching: Implement caching for K8s API responses (e.g., GVR mappings, or even resources if appropriate for the use case, though apply usually implies fresh data).
-
-Security: (No change)
-
-Metrics and Tracing: (No change)
+## 12. Future Considerations
+- Advanced Resource Queries: Support more complex query mechanisms if needed.
+- Policy Loading from Git/Kustomize: Re-introduce if policies also need to be sourced dynamically (as per previous iterations of this document).
+- Caching: Implement caching for K8s API responses (e.g., GVR mappings, or even resources if appropriate for the use case, though apply usually implies fresh data).
+- Security: (No change)
+- Metrics and Tracing: (No change)
 
 This architecture now centralizes resource acquisition through the Kubernetes API, providing flexibility for different deployment scenarios of the MCP server.
