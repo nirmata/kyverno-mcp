@@ -15,6 +15,8 @@ a `kustomization.yaml` file is found.
 
 Resources should be loaded using the Kubernetes API. The server should handle running in cluster, with a service account, or outside of a cluster. When running outside a cluster a `--kubeconfig` parameter is used to pass the Kubernetes credentials.
 
+## Implementation
+
 I would like to use Golang and the https://github.com/mark3labs/mcp-go library.
 
 I like how the FluxCD project has implemented their MCP server. You can use that as a reference. 
