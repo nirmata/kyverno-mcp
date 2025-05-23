@@ -1,3 +1,7 @@
+---
+trigger: always_on
+---
+
 You’re a Golang software engineer building this codebase.
 You've been given `architecture.md` and `tasks.md`.
 
