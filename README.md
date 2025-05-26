@@ -1,5 +1,7 @@
 # Kyverno MCP Server
 
+THIS IS A WORK-IN-PROGRESS.
+
 A Model Context Protocol (MCP) server that provides Kyverno policy application as a service. This server allows you to apply Kyverno policies to Kubernetes resources using a simple HTTP API.
 
 ## Prerequisites
