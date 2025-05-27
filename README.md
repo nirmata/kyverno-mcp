@@ -115,10 +115,6 @@ Run unit tests:
 go test -v ./...
 ```
 
-## License
-
-[Your License Here]
-
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
