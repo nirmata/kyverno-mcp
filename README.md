@@ -1,154 +1,130 @@
 # Kyverno MCP Server
 
-THIS IS A WORK-IN-PROGRESS.
+A Model Context Protocol (MCP) server that provides Kyverno policy management capabilities through a standardized interface. This server allows AI assistants to interact with Kyverno policies in a Kubernetes cluster.
 
-A Model Context Protocol (MCP) server that provides Kyverno policy application as a service. This server allows you to apply Kyverno policies to Kubernetes resources using a simple HTTP API.
+## Features
+
+- **Scan Cluster**: Scan the cluster for resources that match specific Kyverno policies
+- **Apply Policy**: Apply Kyverno policies to specific resources in the cluster
+- **Kubernetes Context Support**: Work with different Kubernetes clusters using context switching
+- **Debug Mode**: Enable detailed logging for troubleshooting
 
 ## Prerequisites
 
-Before you begin, ensure you have the following installed on your system:
-
-- Go 1.24.1 or later
-- Kubernetes cluster (EKS, Minikube, or any other Kubernetes distribution)
-- `kubectl` configured to communicate with your cluster
-- AWS CLI (if using EKS)
-- Docker (if using Minikube)
+- Go 1.16 or higher
+- Kubernetes cluster with Kyverno installed
+- `kubectl` configured with access to your cluster
+- Kyverno CLI (optional, for local testing)
 
 ## Installation
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/kyverno/go-kyverno-mcp.git
-   cd go-kyverno-mcp
+   git clone <repository-url>
+   cd kyverno-mcp
    ```
 
-2. Build the server:
+2. Build the binary:
    ```bash
-   go build -o kyverno-mcp-server ./cmd/kyverno-mcp-server
+   go build -o kyverno-mcp main.go
    ```
-
-## Configuration
-
-The server can be configured using command-line flags:
-
-- `--kubeconfig`: Path to the kubeconfig file (default: uses in-cluster config)
-- `--port`: Port to listen on (default: 8080)
 
 ## Usage
 
 ### Starting the Server
 
-To start the server with a specific kubeconfig:
-
 ```bash
-KUBECONFIG=~/.kube/config ./kyverno-mcp-server --kubeconfig ~/.kube/config
+./kyverno-mcp --context=<your-k8s-context> --debug
 ```
 
-### API Endpoints
+### Available Tools
 
-#### Health Check
+#### 1. Scan Cluster
 
-Check if the server is running:
+Scan the cluster for resources that match a specific Kyverno policy.
 
-```bash
-curl http://localhost:8080/health
-```
+**Parameters:**
+- `policy` (string, required): Name of the policy to scan with
+- `namespace` (string, required): Namespace to scan (use 'all' for all namespaces)
+- `kind` (string, required): Kind of resources to scan (e.g., Pod, Deployment)
 
-#### Apply Policies
-
-Apply Kyverno policies to resources:
-
-```bash
-curl -X POST -H "Content-Type: application/json" -d @request.json http://localhost:8080/apply
-```
-
-Example `request.json`:
-
+**Example Request:**
 ```json
 {
-  "policyPaths": ["/path/to/policy.yaml"],
-  "resourceQueries": [
-    {
-      "apiVersion": "v1",
-      "kind": "Pod",
-      "namespace": "default"
-    }
-  ],
-  "mutate": false,
-  "validate": true
+  "policy": "validate-pod-labels",
+  "namespace": "default",
+  "kind": "Pod"
 }
 ```
 
-### Example Workflow
+#### 2. Apply Policy
 
-1. Start the server:
-   ```bash
-   KUBECONFIG=~/.kube/config ./kyverno-mcp-server --kubeconfig ~/.kube/config
-   ```
+Apply a Kyverno policy to a specific resource in the cluster.
 
-2. Create a policy file (e.g., `disallow-privileged.yaml`):
-   ```yaml
-   apiVersion: kyverno.io/v1
-   kind: ClusterPolicy
-   metadata:
-     name: disallow-privileged
-   spec:
-     validationFailureAction: enforce
-     rules:
-     - name: validate-privileged
-       match:
-         resources:
-           kinds:
-           - Pod
-       validate:
-         message: "Privileged mode is not allowed. Please remove privileged mode or set it to false."
-         pattern:
-           spec:
-             containers:
-             - (name): "*"
-               securityContext:
-                 privileged: false
-   ```
+**Parameters:**
+- `policy` (string, required): Name of the policy to apply
+- `resource` (string, required): Name of the resource to apply the policy to
+- `namespace` (string, required): Namespace of the resource
 
-3. Create a request file (e.g., `request.json`):
-   ```json
-   {
-     "policyPaths": ["./disallow-privileged.yaml"],
-     "resourceQueries": [
-       {
-         "apiVersion": "v1",
-         "kind": "Pod",
-         "namespace": "default"
-       }
-     ]
-   }
-   ```
+**Example Request:**
+```json
+{
+  "policy": "validate-pod-labels",
+  "resource": "my-pod",
+  "namespace": "default"
+}
+```
 
-4. Send the request:
-   ```bash
-   curl -X POST -H "Content-Type: application/json" -d @request.json http://localhost:8080/apply
-   ```
+## Configuration
+
+### Command Line Flags
+
+- `--context`: Kubernetes context to use (default: current context)
+- `--debug`: Enable debug logging (default: false)
+
+## Integration with Claude AI
+
+To use this MCP server with Claude AI, update your Claude desktop configuration:
+
+```json
+{
+  "mcpServers": {
+    "kyverno": {
+      "command": "/path/to/kyverno-mcp",
+      "args": [
+        "--context=minikube",
+        "--debug"
+      ]
+    }
+  }
+}
+```
 
 ## Development
 
 ### Building
 
 ```bash
-go build -o kyverno-mcp-server ./cmd/kyverno-mcp-server
+go build -o kyverno-mcp main.go
 ```
 
 ### Testing
 
-Run the tests:
-
+Run unit tests:
 ```bash
-go test ./...
+go test -v ./...
 ```
 
 ## License
 
-This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
+[Your License Here]
 
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
+
+## Acknowledgements
+
+- [Kyverno](https://kyverno.io/)
+- [Model Context Protocol](https://modelcontextprotocol.io/)
+- [Kubernetes](https://kubernetes.io/)
