@@ -20,7 +20,7 @@ A Model Context Protocol (MCP) server that provides Kyverno policy management ca
 
 1. Clone the repository:
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/nirmata/go-kyverno-mcp
    cd kyverno-mcp
    ```
 
