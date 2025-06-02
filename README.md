@@ -1,16 +1,14 @@
 # Kyverno MCP Server
 
-A Model Context Protocol (MCP) server that provides Kyverno policy management capabilities through a standardized interface. This server allows AI assistants to interact with Kyverno policies in a Kubernetes cluster.
+A Model Context Protocol (MCP) server that provides Kyverno policy management capabilities through a standardized interface. This server allows AI assistants to interact with Kyverno policies in a Kubernetes cluster and search Kyverno documentation using AWS Bedrock's Knowledge Base.
 
 ## Features
 
 - **Kubernetes Context Management**: List and switch between different Kubernetes contexts
 - **Cluster Scanning**: Scan the cluster for resources that match specific Kyverno policies
-- **Policy Management**: Apply Kyverno policies to specific resources in the cluster
 - **Policy Inspection**: List and inspect cluster and namespaced policies
 - **Policy Reports**: View policy reports across namespaces
-- **Policy Exceptions**: List policy exceptions
-- **Debug Mode**: Enable detailed logging for troubleshooting
+- **Documentation Search**: Search Kyverno documentation using AWS Bedrock Knowledge Base
 
 ## Prerequisites
 
@@ -18,16 +16,21 @@ A Model Context Protocol (MCP) server that provides Kyverno policy management ca
 - Kubernetes cluster with Kyverno installed
 - `kubectl` configured with access to your cluster
 - Kyverno CLI (optional, for local testing)
+- AWS credentials with access to Bedrock Knowledge Base (for documentation search)
+- AWS Bedrock Knowledge Base ID for Kyverno documentation
 
 ## Installation
 
 1. Clone the repository:
+
    ```bash
    git clone https://github.com/nirmata/go-kyverno-mcp
    cd go-kyverno-mcp
    ```
 
+
 2. Build the binary:
+
    ```bash
    go build -o kyverno-mcp main.go
    ```
@@ -65,7 +68,36 @@ Enable debug logging:
 
 ## Available Tools
 
-### 1. List Kubernetes Contexts
+### 1. Search Kyverno Documentation
+
+Search Kyverno documentation using AWS Bedrock's Knowledge Base.
+
+**Parameters:**
+
+- `query` (string, required): The search query string
+- `size` (string, optional): Number of search results to return (default: 10)
+
+**Example Request:**
+```json
+{
+  "tool": "search_kyverno_docs",
+  "query": "how to create a validate policy",
+  "size": "5"
+}
+```
+
+**Response Format:**
+```json
+[
+  {
+    "content": "Kyverno policy example for validation...",
+    "score": 0.95,
+    "location_s3_uri": "s3://bucket/path/to/doc"
+  }
+]
+```
+
+### 2. List Kubernetes Contexts
 
 List all available Kubernetes contexts.
 
@@ -76,7 +108,7 @@ List all available Kubernetes contexts.
 }
 ```
 
-### 2. Switch Kubernetes Context
+### 3. Switch Kubernetes Context
 
 Switch to a different Kubernetes context.
 
@@ -91,7 +123,7 @@ Switch to a different Kubernetes context.
 }
 ```
 
-### 3. Scan Cluster
+### 4. Scan Cluster
 
 Scan the cluster for resources that match a specific Kyverno policy.
 
