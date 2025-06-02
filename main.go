@@ -1,3 +1,6 @@
+// Package main implements the Kyverno MCP (Model Context Protocol) server.
+// It provides tools for interacting with Kyverno policy engine and AWS Bedrock's Knowledge Base
+// for Kyverno documentation search.
 package main
 
 import (
@@ -6,7 +9,12 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"strconv"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/bedrockagentruntime"
+	"github.com/aws/aws-sdk-go-v2/service/bedrockagentruntime/types"
 	kyvernov1alpha2 "github.com/kyverno/kyverno/api/policyreport/v1alpha2"
 	kyvernoclient "github.com/kyverno/kyverno/pkg/client/clientset/versioned"
 	kyvernov1 "github.com/kyverno/kyverno/pkg/client/clientset/versioned/typed/kyverno/v1"
@@ -137,7 +145,7 @@ func NewKyvernoClientWithConfig(kubeconfigPath, contextName string) (*KyvernoCli
 }
 
 // ValidateContext checks if the specified context exists in the kubeconfig
-func (k *KyvernoClient) ValidateContext(contextName string) (bool, error) {
+func (k *KyvernoClient) ValidateContext(_ string) (bool, error) {
 	// In a real implementation, this would check the kubeconfig for the context
 	// For now, we'll just return true to simulate a successful validation
 	return true, nil
@@ -260,7 +268,7 @@ func main() {
 	// Add a tool to list available contexts
 	s.AddTool(mcp.NewTool("list_contexts",
 		mcp.WithDescription("List all available Kubernetes contexts"),
-	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	), func(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		// In a real implementation, this would read the kubeconfig file
 		// and extract the list of contexts
 		// For now, we'll return a placeholder list
@@ -286,7 +294,7 @@ func main() {
 			mcp.Description("Name of the context to switch to"),
 			mcp.Required(),
 		),
-	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	), func(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		// Get the context parameter
 		contextName, err := request.RequireString("context")
 		if err != nil {
@@ -342,15 +350,16 @@ func main() {
 	)
 
 	// Register the scan cluster tool
-	s.AddTool(scanClusterTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	s.AddTool(scanClusterTool, func(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		_ = request // Mark unused parameter
 		args, ok := request.Params.Arguments.(map[string]interface{})
 		if !ok {
-			return mcp.NewToolResultText("Error: invalid arguments format"), nil
+			return createToolResultError("Error: invalid arguments format"), nil
 		}
 
 		policyName, ok := args["policy"].(string)
 		if !ok || policyName == "" {
-			return mcp.NewToolResultText("Error: 'policy' parameter is required"), nil
+			return createToolResultError("Error: 'policy' parameter is required"), nil
 		}
 
 		namespace, _ := args["namespace"].(string)
@@ -404,10 +413,10 @@ func main() {
 
 		resultJSON, err := json.MarshalIndent(result, "", "  ")
 		if err != nil {
-			return mcp.NewToolResultText(fmt.Sprintf("Error formatting result: %v", err)), nil
+			return createToolResultError(fmt.Sprintf("Error formatting result: %v", err)), nil
 		}
 
-		return mcp.NewToolResultText(string(resultJSON)), nil
+		return createToolResult(string(resultJSON)), nil
 	})
 
 	// Create a tool to apply a policy to resources
@@ -420,15 +429,16 @@ func main() {
 	)
 
 	// Register the apply policy tool
-	s.AddTool(applyPolicyTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	s.AddTool(applyPolicyTool, func(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		_ = request // Mark unused parameter
 		args, ok := request.Params.Arguments.(map[string]interface{})
 		if !ok {
-			return mcp.NewToolResultText("Error: invalid arguments format"), nil
+			return createToolResultError("Error: invalid arguments format"), nil
 		}
 
 		policyName, ok := args["policy"].(string)
 		if !ok || policyName == "" {
-			return mcp.NewToolResultText("Error: 'policy' parameter is required"), nil
+			return createToolResultError("Error: 'policy' parameter is required"), nil
 		}
 
 		resourceName, ok := args["resource"].(string)
@@ -481,9 +491,9 @@ func main() {
 	// Add tool to list cluster policies
 	s.AddTool(mcp.NewTool("list_cluster_policies",
 		mcp.WithDescription("List all Kyverno cluster policies"),
-	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	), func(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		// Get the list of cluster policies
-		policies, err := kyvernoClient.KyvernoV1().ClusterPolicies().List(ctx, metav1.ListOptions{})
+		policies, err := kyvernoClient.KyvernoV1().ClusterPolicies().List(context.TODO(), metav1.ListOptions{})
 		if err != nil {
 			return createToolResultError(fmt.Sprintf("Error listing cluster policies: %v", err)), nil
 		}
@@ -523,9 +533,9 @@ func main() {
 	// Add tool to list namespaced policies across all namespaces
 	s.AddTool(mcp.NewTool("list_namespaced_policies",
 		mcp.WithDescription("List all Kyverno namespaced policies across all namespaces"),
-	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	), func(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		// Get the list of namespaced policies
-		policies, err := kyvernoClient.KyvernoV1().Policies(metav1.NamespaceAll).List(ctx, metav1.ListOptions{})
+		policies, err := kyvernoClient.KyvernoV1().Policies(metav1.NamespaceAll).List(context.TODO(), metav1.ListOptions{})
 		if err != nil {
 			return createToolResultError(fmt.Sprintf("Error listing namespaced policies: %v", err)), nil
 		}
@@ -568,7 +578,7 @@ func main() {
 	// Add tool to list policy reports across all namespaces
 	s.AddTool(mcp.NewTool("list_policy_reports",
 		mcp.WithDescription("List all Kyverno policy reports across all namespaces"),
-	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	), func(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		// Get the list of policy reports
 		reports, err := kyvernoClient.Wgpolicyk8sV1alpha2().PolicyReports(metav1.NamespaceAll).List(ctx, metav1.ListOptions{})
 		if err != nil {
@@ -640,7 +650,98 @@ func main() {
 		return createToolResult(result), nil
 	})
 
+	// Add tool to search Kyverno documentation using AWS Bedrock
+	s.AddTool(mcp.NewTool("search_kyverno_docs",
+		mcp.WithDescription("Search Kyverno documentation using AWS Bedrock."),
+		mcp.WithString("query", mcp.Description("The search query string.")),
+		mcp.WithString("size", mcp.Description("Optional: Number of search results to return (default: 10). Should be a string representing an integer.")),
+	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		args, ok := request.Params.Arguments.(map[string]interface{})
+		if !ok {
+			return mcp.NewToolResultError("Error: invalid arguments format"), nil
+		}
+
+		query, ok := args["query"].(string)
+		if !ok || query == "" {
+			return mcp.NewToolResultError("query argument is missing or empty"), nil
+		}
+
+		// Default values
+		bedrockRegion := "us-east-1"                       // Update with your AWS region
+		bedrockKnowledgeBaseID := "YOUR_KNOWLEDGE_BASE_ID" // Replace with your Bedrock Knowledge Base ID
+		bedrockNumberOfResults := 10
+
+		// Parse size parameter if provided
+		if sizeStr, ok := args["size"].(string); ok && sizeStr != "" {
+			if size, err := strconv.Atoi(sizeStr); err == nil && size > 0 {
+				bedrockNumberOfResults = size
+			}
+		}
+
+		log.Printf("Retrieving from Bedrock KB. Query: '%s', KB ID: '%s'", query, bedrockKnowledgeBaseID)
+
+		// Load AWS config
+		cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(bedrockRegion))
+		if err != nil {
+			log.Printf("Error loading AWS SDK config for Bedrock Agent Runtime: %v", err)
+			return mcp.NewToolResultError(fmt.Sprintf("unable to load AWS SDK config: %v", err)), nil
+		}
+
+		// Create Bedrock Agent Runtime client
+		brAgentClient := bedrockagentruntime.NewFromConfig(cfg)
+
+		// Prepare the Retrieve API input
+		numberOfResults := int32(bedrockNumberOfResults)
+		retrieveInput := &bedrockagentruntime.RetrieveInput{
+			KnowledgeBaseId: aws.String(bedrockKnowledgeBaseID),
+			RetrievalQuery: &types.KnowledgeBaseQuery{
+				Text: aws.String(query),
+			},
+			RetrievalConfiguration: &types.KnowledgeBaseRetrievalConfiguration{
+				VectorSearchConfiguration: &types.KnowledgeBaseVectorSearchConfiguration{
+					NumberOfResults: &numberOfResults,
+				},
+			},
+		}
+
+		log.Printf("Calling Bedrock Agent Runtime Retrieve API for KB ID '%s'...", bedrockKnowledgeBaseID)
+		retrieveOutput, err := brAgentClient.Retrieve(ctx, retrieveInput)
+		if err != nil {
+			log.Printf("Error calling Bedrock Retrieve API: %v", err)
+			return mcp.NewToolResultError(fmt.Sprintf("failed to retrieve from Bedrock KB: %v", err)), nil
+		}
+
+		// Format the results
+		results := make([]map[string]interface{}, len(retrieveOutput.RetrievalResults))
+		for i, r := range retrieveOutput.RetrievalResults {
+			resultMap := map[string]interface{}{
+				"content": "",
+				"score":   0.0,
+			}
+			if r.Content != nil && r.Content.Text != nil {
+				resultMap["content"] = *r.Content.Text
+			}
+			if r.Score != nil {
+				resultMap["score"] = *r.Score
+			}
+			if r.Location != nil && r.Location.S3Location != nil && r.Location.S3Location.Uri != nil {
+				resultMap["location_s3_uri"] = *r.Location.S3Location.Uri
+			}
+			results[i] = resultMap
+		}
+
+		formattedResponse, err := json.MarshalIndent(results, "", "  ")
+		if err != nil {
+			log.Printf("Error formatting Bedrock Retrieve API JSON response: %v", err)
+			return mcp.NewToolResultError(fmt.Sprintf("failed to format Bedrock Retrieve API JSON response: %v", err)), nil
+		}
+
+		log.Println("Successfully received response from Bedrock Retrieve API.")
+		return mcp.NewToolResultText(string(formattedResponse)), nil
+	})
+
 	// Start the MCP server
+	log.Println("Starting MCP server on stdio...")
 	if err := server.ServeStdio(s); err != nil {
 		log.Fatalf("Error starting server: %v\n", err)
 	}
