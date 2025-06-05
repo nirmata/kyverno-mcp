@@ -9,6 +9,7 @@ require (
 	github.com/mark3labs/mcp-go v0.29.0
 	helm.sh/helm/v3 v3.18.2
 	k8s.io/cli-runtime v0.33.0
+	sigs.k8s.io/yaml v1.4.0
 )
 
 require (
@@ -316,7 +317,6 @@ require (
 	sigs.k8s.io/randfill v1.0.0 // indirect
 	sigs.k8s.io/release-utils v0.11.0 // indirect
 	sigs.k8s.io/structured-merge-diff/v4 v4.6.0 // indirect
-	sigs.k8s.io/yaml v1.4.0 // indirect
 )
 
 require (

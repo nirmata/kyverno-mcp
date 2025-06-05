@@ -31,6 +31,7 @@ import (
 	"helm.sh/helm/v3/pkg/chart/loader"
 	"helm.sh/helm/v3/pkg/cli"
 	"helm.sh/helm/v3/pkg/repo"
+	"sigs.k8s.io/yaml"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -74,15 +75,23 @@ func NewLocalPolicyEngine() *LocalPolicyEngine {
 // ValidatePolicy validates a policy against a resource locally
 func (e *LocalPolicyEngine) ValidatePolicy(policyBytes, resourceBytes []byte) ([]kyvernoapi.EngineResponse, error) {
 	// Parse policy
+	policyJSONBytes, err := yaml.YAMLToJSON(policyBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert policy YAML to JSON: %v", err)
+	}
 	policy := &unstructured.Unstructured{}
-	if err := policy.UnmarshalJSON(policyBytes); err != nil {
-		return nil, fmt.Errorf("failed to parse policy: %v", err)
+	if err := policy.UnmarshalJSON(policyJSONBytes); err != nil {
+		return nil, fmt.Errorf("failed to parse policy JSON: %v", err)
 	}
 
 	// Parse resource
+	resourceJSONBytes, err := yaml.YAMLToJSON(resourceBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to convert resource YAML to JSON: %v", err)
+	}
 	resource := &unstructured.Unstructured{}
-	if err := resource.UnmarshalJSON(resourceBytes); err != nil {
-		return nil, fmt.Errorf("failed to parse resource: %v", err)
+	if err := resource.UnmarshalJSON(resourceJSONBytes); err != nil {
+		return nil, fmt.Errorf("failed to parse resource JSON: %v", err)
 	}
 
 	// Convert to Kyverno policy
@@ -594,15 +603,17 @@ func main() {
 			return mcp.NewToolResultError("Error: invalid arguments format"), nil
 		}
 
-		policyYAML, ok := args["policy"].([]byte)
-		if !ok || policyYAML == nil {
+		policyStr, ok := args["policy"].(string)
+		if !ok || policyStr == "" {
 			return mcp.NewToolResultError("Error: 'policy' parameter with YAML content is required"), nil
 		}
+		policyYAML := []byte(policyStr)
 
-		resourceYAML, ok := args["resource"].([]byte)
-		if !ok || resourceYAML == nil {
+		resourceStr, ok := args["resource"].(string)
+		if !ok || resourceStr == "" {
 			return mcp.NewToolResultError("Error: 'resource' parameter with YAML content is required"), nil
 		}
+		resourceYAML := []byte(resourceStr)
 
 		// Validate the policy against the resource using the local engine
 		responses, err := kyvernoClient.policyEngine.ValidatePolicy([]byte(policyYAML), []byte(resourceYAML))
