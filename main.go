@@ -8,10 +8,12 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -274,7 +276,7 @@ type PolicyReportResult struct {
 
 func main() {
 	// Setup logging to standard output
-	log.SetOutput(os.Stdout)
+	log.SetOutput(os.Stderr)
 	log.Println("Logging initialized to Stdout.")
 	log.Println("------------------------------------------------------------------------")
 	log.Printf("Kyverno MCP Server starting at %s", time.Now().Format(time.RFC3339))
@@ -443,7 +445,7 @@ func main() {
 	scanClusterTool := mcp.NewTool(
 		"scan_cluster",
 		mcp.WithDescription("Scan the cluster for resources that match the given policy"),
-		mcp.WithString("policy", mcp.Description("Name of the policy to scan with")),
+		mcp.WithString("policy", mcp.Description("Comma-separated Git repository URLs for policies (e.g., https://github.com/org/repo.git). Use 'default' or empty for Nirmata default policies.")),
 		mcp.WithString("namespace", mcp.Description("Namespace to scan (use 'all' for all namespaces)")),
 		mcp.WithString("kind", mcp.Description("Kind of resources to scan (e.g., Pod, Deployment)")),
 	)
@@ -452,69 +454,129 @@ func main() {
 	s.AddTool(scanClusterTool, func(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args, ok := request.Params.Arguments.(map[string]interface{})
 		if !ok {
+			log.Printf("Error in scan_cluster: invalid arguments format")
 			return mcp.NewToolResultError("Error: invalid arguments format"), nil
 		}
 
-		policyName, ok := args["policy"].(string)
-		if !ok || policyName == "" {
-			return mcp.NewToolResultError("Error: 'policy' parameter is required"), nil
-		}
-
+		policyArg, _ := args["policy"].(string) // Can be empty or "default"
 		namespace, _ := args["namespace"].(string)
 		kind, _ := args["kind"].(string)
 
-		// Get all policy reports
-		reportResults, err := kyvernoClient.GetPolicyReports(namespace)
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Error getting policy reports: %v", err)), nil
+		log.Printf("scan_cluster called with policy: '%s', namespace: '%s', kind: '%s'", policyArg, namespace, kind)
+
+		// Define default Nirmata policy set Git URLs
+		defaultNirmataPolicyURLs := []string{
+			"https://github.com/kyverno/policies.git",
+			"https://github.com/nirmata/kyverno-policies.git",
+			"https://github.com/kyverno/policy-reporter.git",
+			"https://github.com/kyverno/samples.git",
+		}
+		if len(defaultNirmataPolicyURLs) == 0 { // This condition will now likely be false, but kept for safety
+			log.Println("scan_cluster: Warning - Default Nirmata policy URLs are not set. 'default' policy option will result in no policies from git.")
 		}
 
-		// Filter results based on the requested policy and resource kind
-		var matches []map[string]interface{}
-		for _, result := range reportResults {
-			// Skip if policy name doesn't match
-			if policyName != "" && result.Policy != policyName {
-				continue
+		var policyURLs []string
+		if policyArg == "" || strings.ToLower(policyArg) == "default" {
+			policyURLs = defaultNirmataPolicyURLs
+			if len(policyURLs) == 0 {
+				log.Println("scan_cluster: Using no policies as 'default' is selected but no default URLs are configured.")
 			}
-
-			// Skip if kind doesn't match
-			if kind != "" {
-				kindMatch := false
-				for _, resource := range result.Resources {
-					if resource.Kind == kind {
-						kindMatch = true
-						break
-					}
-				}
-				if !kindMatch {
-					continue
+		} else {
+			for _, p := range strings.Split(policyArg, ",") {
+				trimmed := strings.TrimSpace(p)
+				if trimmed != "" {
+					policyURLs = append(policyURLs, trimmed)
 				}
 			}
-
-			// Add matching result
-			matches = append(matches, map[string]interface{}{
-				"policy":    result.Policy,
-				"rule":      result.Rule,
-				"result":    result.Result,
-				"message":   result.Message,
-				"resources": result.Resources,
-				"timestamp": result.Timestamp,
-			})
 		}
 
-		// Prepare the result
-		result := map[string]interface{}{
-			"status":  "success",
-			"count":   len(matches),
-			"results": matches,
+		// Construct kubectl command
+		kubectlCmdArgs := []string{"get"}
+		if kind == "" || strings.ToLower(kind) == "all" {
+			kubectlCmdArgs = append(kubectlCmdArgs, "all")
+		} else {
+			kubectlCmdArgs = append(kubectlCmdArgs, kind)
 		}
 
-		resultJSON, err := json.MarshalIndent(result, "", "  ")
+		if namespace != "" && strings.ToLower(namespace) != "all" {
+			kubectlCmdArgs = append(kubectlCmdArgs, "--namespace", namespace)
+		} else if strings.ToLower(namespace) == "all" {
+			kubectlCmdArgs = append(kubectlCmdArgs, "--all-namespaces")
+		}
+		kubectlCmdArgs = append(kubectlCmdArgs, "-o", "yaml")
+
+		log.Printf("scan_cluster: Executing kubectl command: kubectl %s", strings.Join(kubectlCmdArgs, " "))
+		kubectlCmd := exec.Command("kubectl", kubectlCmdArgs...)
+
+		// Construct kyverno command
+		kyvernoCmdArgs := []string{"scan", "-"} // Read from stdin
+		for _, url := range policyURLs {
+			kyvernoCmdArgs = append(kyvernoCmdArgs, "--policy", url)
+		}
+
+		if len(policyURLs) == 0 {
+			log.Println("scan_cluster: No policy URLs provided or resolved. Kyverno scan will proceed without specific git policies.")
+		}
+
+		log.Printf("scan_cluster: Executing kyverno command: kyverno %s", strings.Join(kyvernoCmdArgs, " "))
+		kyvernoCmd := exec.Command("kyverno", kyvernoCmdArgs...)
+
+		// Create a pipe to connect kubectl's stdout to kyverno's stdin
+		r, w := io.Pipe()
+		kubectlCmd.Stdout = w
+		kyvernoCmd.Stdin = r
+
+		var kyvernoCombinedOutput bytes.Buffer // To capture both stdout and stderr from kyverno
+		kyvernoCmd.Stdout = &kyvernoCombinedOutput
+		kyvernoCmd.Stderr = &kyvernoCombinedOutput
+
+		var kubectlErrOutput bytes.Buffer
+		kubectlCmd.Stderr = &kubectlErrOutput
+
+		// Start kyverno command first, then kubectl
+		err := kyvernoCmd.Start()
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Error formatting result: %v", err)), nil
+			log.Printf("Error in scan_cluster: Failed to start kyverno command: %v. Output: %s", err, kyvernoCombinedOutput.String())
+			return mcp.NewToolResultError(fmt.Sprintf("Error starting kyverno command: %v. Output: %s", err, kyvernoCombinedOutput.String())), nil
 		}
 
-		return mcp.NewToolResultText(string(resultJSON)), nil
+		err = kubectlCmd.Start()
+		if err != nil {
+			log.Printf("Error in scan_cluster: Failed to start kubectl command: %v. Stderr: %s", err, kubectlErrOutput.String())
+			w.Close()         // Close the writer end of the pipe to signal kyvernoCmd
+			kyvernoCmd.Wait() // Wait for kyverno to finish processing any partial input
+			return mcp.NewToolResultError(fmt.Sprintf("Error starting kubectl command: %v. Stderr: %s", err, kubectlErrOutput.String())), nil
+		}
+
+		// Goroutine to wait for kubectl and close the writer part of the pipe
+		kubectlDone := make(chan error, 1)
+		go func() {
+			kubectlDone <- kubectlCmd.Wait()
+			close(kubectlDone)
+			w.Close()
+		}()
+
+		// Wait for kyverno command to finish
+		kyvernoErr := kyvernoCmd.Wait()
+
+		// Check kubectl error after kyverno is done (or if kyverno failed early)
+		kubectlErr := <-kubectlDone
+		if kubectlErr != nil {
+			log.Printf("Error in scan_cluster: kubectl command failed: %v. Stderr: %s", kubectlErr, kubectlErrOutput.String())
+			// Prepend kubectl error to kyverno's output if any
+			kubectlErrorMsg := fmt.Sprintf("kubectl command error: %v. Stderr: %s\n---\n%s", kubectlErr, kubectlErrOutput.String(), kyvernoCombinedOutput.String())
+			return mcp.NewToolResultError(kubectlErrorMsg), nil
+		}
+
+		if kyvernoErr != nil {
+			// Kyverno exited with an error, output likely contains details
+			log.Printf("Error in scan_cluster: kyverno scan command failed: %v. Combined Output: %s", kyvernoErr, kyvernoCombinedOutput.String())
+			return mcp.NewToolResultError(fmt.Sprintf("kyverno scan command failed: %v. Output: %s", kyvernoErr, kyvernoCombinedOutput.String())), nil
+		}
+
+		scanResult := kyvernoCombinedOutput.String()
+		log.Printf("scan_cluster: Scan completed successfully. Output length: %d", len(scanResult))
+		return mcp.NewToolResultText(scanResult), nil
 	})
 
 	// Create a tool to validate a policy against a resource

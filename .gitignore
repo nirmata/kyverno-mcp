@@ -1,2 +1,5 @@
 kyverno-mcp
-.windsurf/
+.windsurf
+
+# YoYo AI version control directory
+.yoyo/
