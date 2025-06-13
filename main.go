@@ -8,18 +8,14 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/service/bedrockagentruntime"
-	"github.com/aws/aws-sdk-go-v2/service/bedrockagentruntime/types"
 	kyvernov1 "github.com/kyverno/kyverno/api/kyverno/v1"
 	kyvernoclient "github.com/kyverno/kyverno/pkg/client/clientset/versioned"
 	kyvernov1client "github.com/kyverno/kyverno/pkg/client/clientset/versioned/typed/kyverno/v1"
@@ -27,26 +23,63 @@ import (
 	kyvernoapi "github.com/kyverno/kyverno/pkg/engine/api"
 	mcp "github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
-	"helm.sh/helm/v3/pkg/action"
-	"helm.sh/helm/v3/pkg/chart/loader"
-	"helm.sh/helm/v3/pkg/cli"
-	"helm.sh/helm/v3/pkg/repo"
 	"sigs.k8s.io/yaml"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+
+	_ "embed"
 )
 
-const (
-	bedrockRegion          = "us-west-2"  // Bedrock region
-	bedrockKnowledgeBaseID = "KKEWERQI0K" // KB ID
-	bedrockNumberOfResults = 3
-)
+//go:embed policies/pod-security.yaml
+var podSecurityPolicy []byte
+
+//go:embed policies/rbac-best-practices.yaml
+var rbacBestPracticesPolicy []byte
+
+//go:embed policies/kubernetes-best-practices.yaml
+var bestPracticesK8sPolicy []byte
+
+//go:embed policies/all.yaml
+var allPolicy []byte
+
+// Define a package-level map that stores the temporary file path for each embedded policy
+var policyTempFiles map[string]string
+
+func init() {
+	// Initialise the map that will hold temp file paths
+	policyTempFiles = make(map[string]string)
+
+	embedded := map[string][]byte{
+		"pod-security":        podSecurityPolicy,
+		"rbac-best-practices": rbacBestPracticesPolicy,
+		"best-practices-k8s":  bestPracticesK8sPolicy,
+		"all":                 allPolicy,
+	}
+
+	for key, data := range embedded {
+		// Create a temporary file for each embedded policy so that it can be
+		// referenced by path when calling the Kyverno CLI.
+		tmpFile, err := os.CreateTemp("", fmt.Sprintf("%s_*.yaml", strings.ReplaceAll(key, "/", "_")))
+		if err != nil {
+			log.Printf("init: failed to create temp file for embedded policy %s: %v", key, err)
+			continue
+		}
+
+		if _, err := tmpFile.Write(data); err != nil {
+			log.Printf("init: failed to write embedded policy %s to temp file: %v", key, err)
+			_ = tmpFile.Close()
+			continue
+		}
+		_ = tmpFile.Close()
+
+		// Store the temp file path so we can reference it later
+		policyTempFiles[key] = tmpFile.Name()
+	}
+}
 
 // fileExists checks if a file exists and is not a directory
 func fileExists(filename string) bool {
@@ -55,13 +88,6 @@ func fileExists(filename string) bool {
 		return false
 	}
 	return !info.IsDir()
-}
-
-// PolicyDetails holds metadata about a Kyverno policy
-type PolicyDetails struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Severity    string `json:"severity"`
 }
 
 // LocalPolicyEngine handles policy validation locally
@@ -74,7 +100,6 @@ func NewLocalPolicyEngine() *LocalPolicyEngine {
 
 // ValidatePolicy validates a policy against a resource locally
 func (e *LocalPolicyEngine) ValidatePolicy(policyBytes, resourceBytes []byte) ([]kyvernoapi.EngineResponse, error) {
-	// Parse policy
 	policyJSONBytes, err := yaml.YAMLToJSON(policyBytes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to convert policy YAML to JSON: %v", err)
@@ -84,7 +109,6 @@ func (e *LocalPolicyEngine) ValidatePolicy(policyBytes, resourceBytes []byte) ([
 		return nil, fmt.Errorf("failed to parse policy JSON: %v", err)
 	}
 
-	// Parse resource
 	resourceJSONBytes, err := yaml.YAMLToJSON(resourceBytes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to convert resource YAML to JSON: %v", err)
@@ -94,18 +118,13 @@ func (e *LocalPolicyEngine) ValidatePolicy(policyBytes, resourceBytes []byte) ([
 		return nil, fmt.Errorf("failed to parse resource JSON: %v", err)
 	}
 
-	// Convert to Kyverno policy
 	kyvernoPolicy := &kyvernov1.ClusterPolicy{}
 	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(policy.Object, kyvernoPolicy); err != nil {
 		return nil, fmt.Errorf("failed to convert policy to Kyverno policy: %v", err)
 	}
 
-	// Create a simple mock response
-	// In a real implementation, we would use the Kyverno engine to validate the policy
-	// This is a simplified version that just returns a success response
 	rules := []kyvernoapi.RuleResponse{}
 
-	// For each rule in the policy, create a passing rule response
 	for _, rule := range kyvernoPolicy.Spec.Rules {
 		rules = append(rules, *kyvernoapi.RulePass(
 			rule.Name,
@@ -115,7 +134,6 @@ func (e *LocalPolicyEngine) ValidatePolicy(policyBytes, resourceBytes []byte) ([
 		))
 	}
 
-	// If no rules were found, add a default one
 	if len(rules) == 0 {
 		rules = append(rules, *kyvernoapi.RulePass(
 			"default-rule",
@@ -125,96 +143,125 @@ func (e *LocalPolicyEngine) ValidatePolicy(policyBytes, resourceBytes []byte) ([
 		))
 	}
 
-	// Create the engine response
 	response := kyvernoapi.EngineResponse{
 		PatchedResource: *resource,
 	}
-
-	// Set the rules in the policy response
 	response.PolicyResponse.Rules = rules
 
 	return []kyvernoapi.EngineResponse{response}, nil
 }
 
+// ClientConfig holds configuration parameters for creating a KyvernoClient.
+type ClientConfig struct {
+	KubeconfigPath string
+	ContextName    string
+}
+
+// KyvernoClients holds the various initialized Kubernetes and Kyverno client interfaces.
+type KyvernoClients struct {
+	Kubernetes       *kubernetes.Clientset
+	KyvernoV1        kyvernov1client.KyvernoV1Interface
+	WGPolicyV1Alpha2 wgpolicyv1alpha2.Wgpolicyk8sV1alpha2Interface
+}
+
+// PolicyEngine defines the interface for policy validation operations.
+type PolicyEngine interface {
+	ValidatePolicy(policyBytes, resourceBytes []byte) ([]kyvernoapi.EngineResponse, error)
+}
+
 // KyvernoClient represents a client for interacting with Kyverno and Kubernetes
 type KyvernoClient struct {
-	kubeconfigPath   string
-	contextName      string
-	kyvernoClient    *kyvernoclient.Clientset
-	k8sClient        *kubernetes.Clientset
-	config           *rest.Config
-	policyEngine     *LocalPolicyEngine
-	kyvernoV1        kyvernov1client.KyvernoV1Interface
-	wgpolicyV1alpha2 wgpolicyv1alpha2.Wgpolicyk8sV1alpha2Interface
+	clientSetup  *ClientConfig   // Configuration like kubeconfig path and context name
+	clients      *KyvernoClients // Initialized Kubernetes and Kyverno clients
+	policyEngine PolicyEngine    // Engine for validating policies
+	restConfig   *rest.Config    // The active Kubernetes REST configuration
 }
 
 // KubernetesClient returns the underlying Kubernetes clientset
 func (k *KyvernoClient) KubernetesClient() *kubernetes.Clientset {
-	return k.k8sClient
+	if k.clients == nil {
+		return nil
+	}
+	return k.clients.Kubernetes
 }
 
 // NewKyvernoClient creates a new Kyverno client with the default kubeconfig
 func NewKyvernoClient() (*KyvernoClient, error) {
+	// This will attempt in-cluster config first, then fallback to a minimal client for local operations.
 	return NewKyvernoClientWithConfig("", "")
 }
 
 // NewKyvernoClientWithConfig creates a new Kyverno client with the specified kubeconfig and context
 func NewKyvernoClientWithConfig(kubeconfigPath, contextName string) (*KyvernoClient, error) {
-	// Create a minimal config for cases where we don't need a real Kubernetes connection
-	// This allows the client to work without a cluster connection for local policy validation
+	clientSetup := &ClientConfig{
+		KubeconfigPath: kubeconfigPath,
+		ContextName:    contextName,
+	}
+
 	if kubeconfigPath == "" && contextName == "" {
+		// Attempt in-cluster configuration first for the default case
+		rConfig, err := rest.InClusterConfig()
+		if err == nil {
+			k8sClientSet, errK8s := kubernetes.NewForConfig(rConfig)
+			kyvernoBaseClientSet, errKyverno := kyvernoclient.NewForConfig(rConfig)
+
+			if errK8s == nil && errKyverno == nil {
+				kyClients := &KyvernoClients{
+					Kubernetes:       k8sClientSet,
+					KyvernoV1:        kyvernoBaseClientSet.KyvernoV1(),
+					WGPolicyV1Alpha2: kyvernoBaseClientSet.Wgpolicyk8sV1alpha2(),
+				}
+				return &KyvernoClient{
+					clientSetup:  clientSetup,
+					clients:      kyClients,
+					policyEngine: NewLocalPolicyEngine(),
+					restConfig:   rConfig,
+				}, nil
+			}
+			log.Printf("Failed to create clients from in-cluster config (k8sErr: %v, kyvernoErr: %v), proceeding with uninitialized client for local operations.", errK8s, errKyverno)
+		}
 		return &KyvernoClient{
-			kubeconfigPath: "", // Explicitly empty
-			contextName:    "", // Explicitly empty
-			policyEngine:   NewLocalPolicyEngine(),
+			clientSetup:  clientSetup,
+			clients:      nil,
+			policyEngine: NewLocalPolicyEngine(),
+			restConfig:   nil,
 		}, nil
 	}
 
+	// Build loading rules that respect an explicit kubeconfig path, otherwise
+	// they will fall back to the default search logic (\n    //   $KUBECONFIG, ~/.kube/config, in-cluster, etc.).
 	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
-	if kubeconfigPath != "" {
-		loadingRules.ExplicitPath = kubeconfigPath
+	if clientSetup.KubeconfigPath != "" {
+		loadingRules.ExplicitPath = clientSetup.KubeconfigPath
 	}
 
-	configOverrides := &clientcmd.ConfigOverrides{}
-	if contextName != "" {
-		configOverrides.CurrentContext = contextName
-	}
-
-	config, err := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
-		loadingRules,
-		configOverrides,
-	).ClientConfig()
+	kubeCfg := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, &clientcmd.ConfigOverrides{CurrentContext: clientSetup.ContextName})
+	rConfig, err := kubeCfg.ClientConfig()
 	if err != nil {
-		return nil, fmt.Errorf("failed to create Kubernetes config: %v", err)
+		return nil, fmt.Errorf("failed to get client rest config: %w", err)
 	}
 
-	// Create the Kyverno client
-	kyvernoClientSet, err := kyvernoclient.NewForConfig(config)
+	k8sClientSet, err := kubernetes.NewForConfig(rConfig)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create Kyverno client: %v", err)
+		return nil, fmt.Errorf("failed to create kubernetes client: %w", err)
 	}
 
-	// Create the Kyverno v1 client interface
-	kyvernoV1 := kyvernoClientSet.KyvernoV1()
-
-	// Create the Kubernetes client
-	k8sClient, err := kubernetes.NewForConfig(config)
+	kyvernoBaseClientSet, err := kyvernoclient.NewForConfig(rConfig)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create Kubernetes client: %v", err)
+		return nil, fmt.Errorf("failed to create kyverno base client: %w", err)
 	}
 
-	// Policy reports client will be accessed through kyvernoClient
-	wgpolicyV1alpha2Client := kyvernoClientSet.Wgpolicyk8sV1alpha2()
+	kyClients := &KyvernoClients{
+		Kubernetes:       k8sClientSet,
+		KyvernoV1:        kyvernoBaseClientSet.KyvernoV1(),
+		WGPolicyV1Alpha2: kyvernoBaseClientSet.Wgpolicyk8sV1alpha2(),
+	}
 
 	return &KyvernoClient{
-		kubeconfigPath:   kubeconfigPath, // Store the original path
-		contextName:      contextName,    // Store the original context name
-		kyvernoClient:    kyvernoClientSet,
-		k8sClient:        k8sClient,
-		config:           config,
-		policyEngine:     NewLocalPolicyEngine(), // Initialize local engine as well
-		kyvernoV1:        kyvernoV1,
-		wgpolicyV1alpha2: wgpolicyV1alpha2Client,
+		clientSetup:  clientSetup,
+		clients:      kyClients,
+		policyEngine: NewLocalPolicyEngine(),
+		restConfig:   rConfig,
 	}, nil
 }
 
@@ -225,29 +272,57 @@ func (k *KyvernoClient) GetPolicyReports(_ string) ([]PolicyReportResult, error)
 
 // ValidateContext checks if the specified context exists in the kubeconfig
 func (k *KyvernoClient) ValidateContext(contextName string) (bool, error) {
-	// In local mode, we don't have a real kubeconfig to validate against
-	if k.kubeconfigPath == "" {
-		return true, nil
+	kubeconfigPathToUse := ""
+	if k.clientSetup != nil && k.clientSetup.KubeconfigPath != "" {
+		kubeconfigPathToUse = k.clientSetup.KubeconfigPath
+	} else {
+		// If no explicit kubeconfig path, try default loading rules (e.g. $KUBECONFIG or ~/.kube/config)
+		// This is important for validating contexts when client was in-cluster or default initialized.
+		log.Println("ValidateContext: No explicit kubeconfig path, using default loading rules to find contexts.")
 	}
 
-	config, err := clientcmd.LoadFromFile(k.kubeconfigPath)
+	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
+	if kubeconfigPathToUse != "" {
+		loadingRules.ExplicitPath = kubeconfigPathToUse
+	}
+
+	kubeConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, &clientcmd.ConfigOverrides{})
+	rawConfig, err := kubeConfig.RawConfig()
 	if err != nil {
-		return false, fmt.Errorf("failed to load kubeconfig: %v", err)
+		// If default rules also fail to load any config, it might mean no kubeconfig is set up.
+		// In such a scenario, arguably no context can be validated as 'existing'.
+		if os.IsNotExist(err) || strings.Contains(err.Error(), "no such file or directory") || strings.Contains(err.Error(), "ConfigFileNotFound") {
+			log.Printf("ValidateContext: Kubeconfig file not found or accessible via path '%s' or default paths: %v", kubeconfigPathToUse, err)
+			return false, nil // No config file means context can't exist in it.
+		}
+		return false, fmt.Errorf("failed to load raw kubeconfig: %w", err)
 	}
 
-	_, exists := config.Contexts[contextName]
-	return exists, nil
+	if len(rawConfig.Contexts) == 0 && kubeconfigPathToUse == "" && rawConfig.CurrentContext == "" {
+		// If default loading rules yielded an empty config (no contexts, no current-context set)
+		// it's likely there's no actual kubeconfig setup. This is different from a file not found.
+		log.Println("ValidateContext: Kubeconfig loaded via default rules is empty or uninitialized.")
+		return false, nil
+	}
+
+	if _, ok := rawConfig.Contexts[contextName]; !ok {
+		log.Printf("ValidateContext: Context '%s' not found.", contextName)
+		return false, nil // Context does not exist
+	}
+
+	log.Printf("ValidateContext: Context '%s' found.", contextName)
+	return true, nil // Context exists
 }
 
 // SwitchContext switches the current context to the specified context
 func (k *KyvernoClient) SwitchContext(contextName string) error {
 	// In local mode, we don't have a real kubeconfig to switch contexts in
-	if k.kubeconfigPath == "" {
-		k.contextName = contextName
+	if k.clientSetup.KubeconfigPath == "" {
+		k.clientSetup.ContextName = contextName
 		return nil
 	}
 
-	config, err := clientcmd.LoadFromFile(k.kubeconfigPath)
+	config, err := clientcmd.LoadFromFile(k.clientSetup.KubeconfigPath)
 	if err != nil {
 		return fmt.Errorf("failed to load kubeconfig: %v", err)
 	}
@@ -257,11 +332,11 @@ func (k *KyvernoClient) SwitchContext(contextName string) error {
 	}
 
 	config.CurrentContext = contextName
-	if err := clientcmd.WriteToFile(*config, k.kubeconfigPath); err != nil {
+	if err := clientcmd.WriteToFile(*config, k.clientSetup.KubeconfigPath); err != nil {
 		return fmt.Errorf("failed to write kubeconfig: %v", err)
 	}
 
-	k.contextName = contextName
+	k.clientSetup.ContextName = contextName
 	return nil
 }
 
@@ -283,6 +358,55 @@ type PolicyReportResult struct {
 	Timestamp string         `json:"timestamp,omitempty"`
 }
 
+// KyvernoPolicy represents a parsed Kyverno policy from the knowledge base.
+type KyvernoPolicy struct {
+	Name     string `json:"name"`
+	Content  string `json:"content"`
+	Category string `json:"category"`
+	Source   string `json:"source"`
+}
+
+// getPolicySets returns a mapping from policy set key to the temporary file path
+// where the embedded Kyverno policy YAML was written.
+func getPolicySets() map[string]string {
+	return policyTempFiles
+}
+
+// mapKeys returns the keys of a map[string]string sorted alphabetically.
+func mapKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+/*
+// summarizeReport converts a list of PolicyReportResult objects into a simple count summary.
+func summarizeReport(reportName string, results []policyreportv1alpha2.PolicyReportResult) map[string]interface{} {
+	counters := map[string]int{
+		"pass":  0,
+		"fail":  0,
+		"warn":  0,
+		"error": 0,
+		"skip":  0,
+	}
+
+	for _, r := range results {
+		key := strings.ToLower(string(r.Result))
+		if _, ok := counters[key]; ok {
+			counters[key]++
+		}
+	}
+
+	return map[string]interface{}{
+		"report": reportName,
+		"counts": counters,
+	}
+}
+*/
+
 func main() {
 	// Setup logging to standard output
 	log.SetOutput(os.Stderr)
@@ -293,17 +417,27 @@ func main() {
 	log.SetPrefix("kyverno-mcp: ")
 	log.Println("Starting Kyverno MCP server...")
 
-	// Determine default kubeconfig path
+	// Determine default kubeconfig path.
+	// Priority:
+	//   1. Environment variable KUBECONFIG (if set)
+	//   2. <homeDir>/.kube/config (if $HOME can be determined)
+	//   3. Empty string (no default)
+
 	defaultKubeconfigPath := ""
-	homeDir, err := os.UserHomeDir()
-	if err == nil {
-		defaultKubeconfigPath = filepath.Join(homeDir, ".kube", "config")
+
+	if envKube := os.Getenv("KUBECONFIG"); envKube != "" {
+		defaultKubeconfigPath = envKube
 	} else {
-		log.Printf("Warning: Could not determine home directory to set default kubeconfig path: %v", err)
+		homeDir, err := os.UserHomeDir()
+		if err == nil {
+			defaultKubeconfigPath = filepath.Join(homeDir, ".kube", "config")
+		} else {
+			log.Printf("Warning: Could not determine home directory to set default kubeconfig path: %v", err)
+		}
 	}
 
 	// Parse command line flags
-	kubeconfigPath := flag.String("kubeconfig", defaultKubeconfigPath, "Path to the kubeconfig file (defaults to ~/.kube/config)")
+	kubeconfigPath := flag.String("kubeconfig", defaultKubeconfigPath, "Path to the kubeconfig file (env KUBECONFIG overrides; defaults to ~/.kube/config)")
 	contextName := flag.String("context", "", "Name of the kubeconfig context to use")
 	flag.Parse()
 
@@ -453,715 +587,63 @@ func main() {
 	// Create a tool to scan the cluster for resources matching a policy
 	scanClusterTool := mcp.NewTool(
 		"scan_cluster",
-		mcp.WithDescription("Scan the cluster for resources that match the given policy"),
-		mcp.WithString("policy", mcp.Description("Comma-separated Git repository URLs for policies (e.g., https://github.com/org/repo.git). Use 'default' or empty for Nirmata default policies.")),
-		mcp.WithString("namespace", mcp.Description("Namespace to scan (use 'all' for all namespaces)")),
-		mcp.WithString("kind", mcp.Description("Kind of resources to scan (e.g., Pod, Deployment)")),
+		mcp.WithDescription("Scan cluster resources using an embedded Kyverno policy"),
+		mcp.WithString("policySets", mcp.Description("Policy set key: pod-security, rbac-best-practices, best-practices-k8s, all (default: all).")),
+		mcp.WithString("namespace", mcp.Description("Namespace to scan (default: all)")),
 	)
 
 	// Register the scan cluster tool
-	s.AddTool(scanClusterTool, func(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		args, ok := request.Params.Arguments.(map[string]interface{})
-		if !ok {
-			log.Printf("Error in scan_cluster: invalid arguments format")
-			return mcp.NewToolResultError("Error: invalid arguments format"), nil
-		}
-
-		policyArg, _ := args["policy"].(string) // Can be empty or "default"
-		namespace, _ := args["namespace"].(string)
-		kind, _ := args["kind"].(string)
-
-		log.Printf("scan_cluster called with policy: '%s', namespace: '%s', kind: '%s'", policyArg, namespace, kind)
-
-		// Define default Nirmata policy set Git URLs
-		defaultNirmataPolicyURLs := []string{
-			"https://github.com/kyverno/policies.git",
-			"https://github.com/nirmata/kyverno-policies.git",
-			"https://github.com/kyverno/policy-reporter.git",
-			"https://github.com/kyverno/samples.git",
-		}
-		if len(defaultNirmataPolicyURLs) == 0 { // This condition will now likely be false, but kept for safety
-			log.Println("scan_cluster: Warning - Default Nirmata policy URLs are not set. 'default' policy option will result in no policies from git.")
-		}
-
-		var policyURLs []string
-		if policyArg == "" || strings.ToLower(policyArg) == "default" {
-			policyURLs = defaultNirmataPolicyURLs
-			if len(policyURLs) == 0 {
-				log.Println("scan_cluster: Using no policies as 'default' is selected but no default URLs are configured.")
-			}
-		} else {
-			for _, p := range strings.Split(policyArg, ",") {
-				trimmed := strings.TrimSpace(p)
-				if trimmed != "" {
-					policyURLs = append(policyURLs, trimmed)
-				}
-			}
-		}
-
-		// Construct kubectl command
-		kubectlCmdArgs := []string{"get"}
-		if kind == "" || strings.ToLower(kind) == "all" {
-			kubectlCmdArgs = append(kubectlCmdArgs, "all")
-		} else {
-			kubectlCmdArgs = append(kubectlCmdArgs, kind)
-		}
-
-		if namespace != "" && strings.ToLower(namespace) != "all" {
-			kubectlCmdArgs = append(kubectlCmdArgs, "--namespace", namespace)
-		} else if strings.ToLower(namespace) == "all" {
-			kubectlCmdArgs = append(kubectlCmdArgs, "--all-namespaces")
-		}
-		kubectlCmdArgs = append(kubectlCmdArgs, "-o", "yaml")
-
-		log.Printf("scan_cluster: Executing kubectl command: kubectl %s", strings.Join(kubectlCmdArgs, " "))
-		kubectlCmd := exec.Command("kubectl", kubectlCmdArgs...)
-
-		// Construct kyverno command
-		kyvernoCmdArgs := []string{"scan", "-"} // Read from stdin
-		for _, url := range policyURLs {
-			kyvernoCmdArgs = append(kyvernoCmdArgs, "--policy", url)
-		}
-
-		if len(policyURLs) == 0 {
-			log.Println("scan_cluster: No policy URLs provided or resolved. Kyverno scan will proceed without specific git policies.")
-		}
-
-		log.Printf("scan_cluster: Executing kyverno command: kyverno %s", strings.Join(kyvernoCmdArgs, " "))
-		kyvernoCmd := exec.Command("kyverno", kyvernoCmdArgs...)
-
-		// Create a pipe to connect kubectl's stdout to kyverno's stdin
-		r, w := io.Pipe()
-		kubectlCmd.Stdout = w
-		kyvernoCmd.Stdin = r
-
-		var kyvernoCombinedOutput bytes.Buffer // To capture both stdout and stderr from kyverno
-		kyvernoCmd.Stdout = &kyvernoCombinedOutput
-		kyvernoCmd.Stderr = &kyvernoCombinedOutput
-
-		var kubectlErrOutput bytes.Buffer
-		kubectlCmd.Stderr = &kubectlErrOutput
-
-		// Start kyverno command first, then kubectl
-		err := kyvernoCmd.Start()
-		if err != nil {
-			log.Printf("Error in scan_cluster: Failed to start kyverno command: %v. Output: %s", err, kyvernoCombinedOutput.String())
-			return mcp.NewToolResultError(fmt.Sprintf("Error starting kyverno command: %v. Output: %s", err, kyvernoCombinedOutput.String())), nil
-		}
-
-		err = kubectlCmd.Start()
-		if err != nil {
-			log.Printf("Error in scan_cluster: Failed to start kubectl command: %v. Stderr: %s", err, kubectlErrOutput.String())
-			w.Close()         // Close the writer end of the pipe to signal kyvernoCmd
-			kyvernoCmd.Wait() // Wait for kyverno to finish processing any partial input
-			return mcp.NewToolResultError(fmt.Sprintf("Error starting kubectl command: %v. Stderr: %s", err, kubectlErrOutput.String())), nil
-		}
-
-		// Goroutine to wait for kubectl and close the writer part of the pipe
-		kubectlDone := make(chan error, 1)
-		go func() {
-			kubectlDone <- kubectlCmd.Wait()
-			close(kubectlDone)
-			w.Close()
-		}()
-
-		// Wait for kyverno command to finish
-		kyvernoErr := kyvernoCmd.Wait()
-
-		// Check kubectl error after kyverno is done (or if kyverno failed early)
-		kubectlErr := <-kubectlDone
-		if kubectlErr != nil {
-			log.Printf("Error in scan_cluster: kubectl command failed: %v. Stderr: %s", kubectlErr, kubectlErrOutput.String())
-			// Prepend kubectl error to kyverno's output if any
-			kubectlErrorMsg := fmt.Sprintf("kubectl command error: %v. Stderr: %s\n---\n%s", kubectlErr, kubectlErrOutput.String(), kyvernoCombinedOutput.String())
-			return mcp.NewToolResultError(kubectlErrorMsg), nil
-		}
-
-		if kyvernoErr != nil {
-			// Kyverno exited with an error, output likely contains details
-			log.Printf("Error in scan_cluster: kyverno scan command failed: %v. Combined Output: %s", kyvernoErr, kyvernoCombinedOutput.String())
-			return mcp.NewToolResultError(fmt.Sprintf("kyverno scan command failed: %v. Output: %s", kyvernoErr, kyvernoCombinedOutput.String())), nil
-		}
-
-		scanResult := kyvernoCombinedOutput.String()
-		log.Printf("scan_cluster: Scan completed successfully. Output length: %d", len(scanResult))
-		return mcp.NewToolResultText(scanResult), nil
-	})
-
-	// Create a tool to validate a policy against a resource
-	validatePolicyTool := mcp.NewTool(
-		"validate_policy",
-		mcp.WithDescription("Validate a Kyverno policy against a Kubernetes resource"),
-		mcp.WithString("policy", mcp.Description("YAML content of the Kyverno policy")),
-		mcp.WithString("resource", mcp.Description("YAML content of the Kubernetes resource to validate")),
-	)
-
-	// Register the validate policy tool
-	s.AddTool(validatePolicyTool, func(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	s.AddTool(scanClusterTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args, ok := request.Params.Arguments.(map[string]interface{})
 		if !ok {
 			return mcp.NewToolResultError("Error: invalid arguments format"), nil
-		}
-
-		policyStr, ok := args["policy"].(string)
-		if !ok || policyStr == "" {
-			return mcp.NewToolResultError("Error: 'policy' parameter with YAML content is required"), nil
-		}
-		policyYAML := []byte(policyStr)
-
-		resourceStr, ok := args["resource"].(string)
-		if !ok || resourceStr == "" {
-			return mcp.NewToolResultError("Error: 'resource' parameter with YAML content is required"), nil
-		}
-		resourceYAML := []byte(resourceStr)
-
-		// Validate the policy against the resource using the local engine
-		responses, err := kyvernoClient.policyEngine.ValidatePolicy([]byte(policyYAML), []byte(resourceYAML))
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Error validating policy: %v", err)), nil
-		}
-
-		// Convert responses to a simplified format
-		var results []map[string]interface{}
-		for _, resp := range responses {
-			for _, ruleResp := range resp.PolicyResponse.Rules {
-				result := map[string]interface{}{
-					"policy":  ruleResp.Name,
-					"rule":    ruleResp.Name,
-					"status":  string(ruleResp.Status()),
-					"message": ruleResp.Message,
-					"valid":   ruleResp.Status() == kyvernoapi.RuleStatusPass,
-				}
-				results = append(results, result)
-			}
-		}
-
-		// Prepare the final result
-		result := map[string]interface{}{
-			"status":  "success",
-			"results": results,
-		}
-
-		resultJSON, err := json.MarshalIndent(result, "", "  ")
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Error formatting result: %v", err)), nil
-		}
-
-		return mcp.NewToolResultText(string(resultJSON)), nil
-	})
-
-	// Add tool to apply a policy to resources (kept for backward compatibility)
-	applyPolicyTool := mcp.NewTool(
-		"apply_policy",
-		mcp.WithDescription("Apply a policy to specified resources in the cluster (legacy, use validate_policy for local validation)"),
-		mcp.WithString("policy", mcp.Description("Name of the policy to apply")),
-		mcp.WithString("resource", mcp.Description("Name of the resource to apply the policy to")),
-		mcp.WithString("namespace", mcp.Description("Namespace of the resource (use 'default' if not specified")),
-	)
-
-	// Register the apply policy tool (legacy version)
-	s.AddTool(applyPolicyTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		_ = ctx // Explicitly using ctx to avoid linter warning
-		// This is the legacy implementation that requires Kyverno to be installed
-		if kyvernoClient.kyvernoClient == nil {
-			return mcp.NewToolResultError("This tool requires Kyverno to be installed in the cluster. Use 'validate_policy' for local validation."), nil
-		}
-
-		args, ok := request.Params.Arguments.(map[string]interface{})
-		if !ok {
-			return mcp.NewToolResultError("Error: invalid arguments format"), nil
-		}
-
-		policyName, ok := args["policy"].(string)
-		if !ok || policyName == "" {
-			return mcp.NewToolResultError("Error: 'policy' parameter is required"), nil
-		}
-
-		resourceName, ok := args["resource"].(string)
-		if !ok || resourceName == "" {
-			return mcp.NewToolResultError("Error: 'resource' parameter is required"), nil
 		}
 
 		namespace, _ := args["namespace"].(string)
 		if namespace == "" {
-			namespace = "default"
+			namespace = "all"
 		}
 
-		// Check if the policy exists
-		_, err := kyvernoClient.kyvernoV1.ClusterPolicies().Get(ctx, policyName, metav1.GetOptions{})
-		if err != nil {
-			// If not found as a ClusterPolicy, check as a NamespacedPolicy
-			_, err = kyvernoClient.kyvernoV1.Policies(namespace).Get(ctx, policyName, metav1.GetOptions{})
-			if err != nil {
-				return mcp.NewToolResultError(fmt.Sprintf("Policy %s not found as ClusterPolicy or in namespace %s: %v", policyName, namespace, err)), nil
-			}
+		policyKey, _ := args["policySets"].(string)
+		if policyKey == "" {
+			policyKey = "all"
 		}
 
-		// Get the resource to apply the policy to
-		_, err = kyvernoClient.KubernetesClient().CoreV1().Pods(namespace).Get(ctx, resourceName, metav1.GetOptions{})
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Error getting resource %s in namespace %s: %v", resourceName, namespace, err)), nil
+		policySets := getPolicySets()
+		policyPath, exists := policySets[strings.ToLower(policyKey)]
+		if !exists {
+			return mcp.NewToolResultError(fmt.Sprintf("Unknown policy '%s'. Valid options: %v", policyKey, mapKeys(policySets))), nil
 		}
 
-		// Check policy reports
-		reportResults, err := kyvernoClient.GetPolicyReports(namespace)
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Error checking policy reports: %v", err)), nil
-		}
-
-		// Check if the policy would be applied to this resource
-		policyApplied := false
-		for _, result := range reportResults {
-			if result.Policy == policyName {
-				for _, res := range result.Resources {
-					if res.Name == resourceName && res.Namespace == namespace {
-						policyApplied = true
-						break
-					}
-				}
-				if policyApplied {
-					break
-				}
-			}
-		}
-
-		// Prepare the result
-		var message string
-		if policyApplied {
-			message = fmt.Sprintf("Policy %s is already applied to %s/%s", policyName, namespace, resourceName)
+		// Build the Kyverno command based on the namespace
+		var cmdStr string
+		if namespace != "all" {
+			cmdStr = fmt.Sprintf("kyverno apply --cluster %s --namespace %s", policyPath, namespace)
 		} else {
-			message = fmt.Sprintf("Policy %s would be applied to %s/%s (no actual changes made)", policyName, namespace, resourceName)
+			cmdStr = fmt.Sprintf("kyverno apply --cluster %s", policyPath)
 		}
 
-		result := map[string]interface{}{
-			"status":    "success",
-			"policy":    policyName,
-			"resource":  resourceName,
-			"namespace": namespace,
-			"message":   message,
-			"applied":   policyApplied,
-		}
+		log.Printf("scan_cluster: Executing Kyverno command: %s", cmdStr)
 
-		resultJSON, err := json.MarshalIndent(result, "", "  ")
+		// Add timeout context for the scan
+		ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+		defer cancel()
+
+		kyvernoCmd := exec.CommandContext(ctx, "bash", "-c", cmdStr)
+
+		var combinedOutput bytes.Buffer
+		kyvernoCmd.Stdout = &combinedOutput
+		kyvernoCmd.Stderr = &combinedOutput
+
+		err := kyvernoCmd.Run()
+		if ctx.Err() == context.DeadlineExceeded {
+			return mcp.NewToolResultError("Scan timed out after 3 minutes"), nil
+		}
 		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Error formatting result: %v", err)), nil
+			return mcp.NewToolResultError(fmt.Sprintf("Kyverno scan failed: %v. Output: %s", err, combinedOutput.String())), nil
 		}
 
-		return mcp.NewToolResultText(string(resultJSON)), nil
-	})
-
-	// Add tool to list cluster policies
-	s.AddTool(mcp.NewTool("list_cluster_policies",
-		mcp.WithDescription("List all Kyverno cluster policies"),
-	), func(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		// Ensure the Kyverno client, specifically kyvernoV1, is initialized.
-		// This interface is nil if the server was started without kubeconfig/context.
-		if kyvernoClient.kyvernoV1 == nil {
-			log.Println("Error in 'list_cluster_policies': kyvernoClient.kyvernoV1 is nil. Server likely started without Kubernetes configuration.")
-			return mcp.NewToolResultError("Cannot list cluster policies: Kyverno client is not fully initialized. Please ensure the MCP server was started with valid Kubernetes configuration (kubeconfig path and/or context name)."), nil
-		}
-
-		// Get the list of cluster policies
-		policies, err := kyvernoClient.kyvernoV1.ClusterPolicies().List(ctx, metav1.ListOptions{})
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Error listing cluster policies: %v", err)), nil
-		}
-
-		// Convert policies to JSON
-		policiesJSON, err := json.MarshalIndent(policies.Items, "", "  ")
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Error marshaling policies: %v", err)), nil
-		}
-
-		return mcp.NewToolResultText(string(policiesJSON)), nil
-	})
-
-	// Add tool to get a specific cluster policy
-	s.AddTool(mcp.NewTool("get_cluster_policy",
-		mcp.WithDescription("Get a specific cluster policy"),
-		mcp.WithString("name", mcp.Description("Name of the cluster policy"), mcp.Required()),
-	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		name, err := request.RequireString("name")
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Invalid name parameter: %v", err)), nil
-		}
-
-		policy, err := kyvernoClient.kyvernoV1.ClusterPolicies().Get(ctx, name, metav1.GetOptions{})
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Error getting cluster policy: %v", err)), nil
-		}
-
-		policyJSON, err := json.MarshalIndent(policy, "", "  ")
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Error marshaling policy: %v", err)), nil
-		}
-
-		return mcp.NewToolResultText(string(policyJSON)), nil
-	})
-
-	// Add tool to list namespaced policies across all namespaces
-	s.AddTool(mcp.NewTool("list_namespaced_policies",
-		mcp.WithDescription("List all Kyverno namespaced policies across all namespaces"),
-	), func(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		// Get the list of namespaced policies
-		policies, err := kyvernoClient.kyvernoV1.Policies(metav1.NamespaceAll).List(ctx, metav1.ListOptions{})
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Error listing namespaced policies: %v", err)), nil
-		}
-
-		// Convert policies to JSON
-		policiesJSON, err := json.MarshalIndent(policies.Items, "", "  ")
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Error marshaling namespaced policies: %v", err)), nil
-		}
-
-		return mcp.NewToolResultText(string(policiesJSON)), nil
-	})
-
-	// Add tool to get namespaced policies by namespace
-	s.AddTool(mcp.NewTool("get_namespaced_policies",
-		mcp.WithDescription("Get namespaced policies by namespace"),
-		mcp.WithString("namespace", mcp.Description("Namespace to get policies from"), mcp.Required()),
-	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		namespace, err := request.RequireString("namespace")
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Invalid namespace parameter: %v", err)), nil
-		}
-
-		policies, err := kyvernoClient.kyvernoV1.Policies(namespace).List(ctx, metav1.ListOptions{})
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Error getting namespaced policies: %v", err)), nil
-		}
-
-		result := make([]string, 0, len(policies.Items))
-		for _, policy := range policies.Items {
-			result = append(result, policy.Name)
-		}
-
-		resultJSON, err := json.MarshalIndent(map[string]interface{}{
-			"namespace": namespace,
-			"policies":  result,
-		}, "", "  ")
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Error marshaling result: %v", err)), nil
-		}
-		return mcp.NewToolResultText(string(resultJSON)), nil
-	})
-
-	// Add tool to list policy reports across all namespaces
-	s.AddTool(mcp.NewTool("list_policy_reports",
-		mcp.WithDescription("List all Kyverno policy reports across all namespaces"),
-	), func(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		// Get the list of policy reports
-		reports, err := kyvernoClient.wgpolicyV1alpha2.PolicyReports(metav1.NamespaceAll).List(ctx, metav1.ListOptions{})
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Error listing policy reports: %v", err)), nil
-		}
-
-		// Convert reports to JSON
-		reportsJSON, err := json.MarshalIndent(reports.Items, "", "  ")
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Error marshaling policy reports: %v", err)), nil
-		}
-
-		return mcp.NewToolResultText(string(reportsJSON)), nil
-	})
-
-	// Add tool to list policy reports by namespace
-	s.AddTool(mcp.NewTool("list_namespaced_policy_reports",
-		mcp.WithDescription("List Kyverno policy reports in a specific namespace"),
-		mcp.WithDescription("List policy reports in a specific namespace"),
-		mcp.WithString("namespace", mcp.Description("Namespace to get policy reports from"), mcp.Required()),
-	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		namespace, err := request.RequireString("namespace")
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Invalid namespace parameter: %v", err)), nil
-		}
-
-		reports, err := kyvernoClient.wgpolicyV1alpha2.PolicyReports(namespace).List(ctx, metav1.ListOptions{})
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Error listing policy reports: %v", err)), nil
-		}
-
-		reportNames := make([]string, 0, len(reports.Items))
-		for _, report := range reports.Items {
-			reportNames = append(reportNames, report.Name)
-		}
-
-		resultJSON, err := json.MarshalIndent(map[string]interface{}{
-			"namespace": namespace,
-			"reports":   reportNames,
-		}, "", "  ")
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Error marshaling result: %v", err)), nil
-		}
-		return mcp.NewToolResultText(string(resultJSON)), nil
-	})
-
-	// Add tool to list policy exceptions
-	s.AddTool(mcp.NewTool("list_policy_exceptions",
-		mcp.WithDescription("List all policy exceptions"),
-		mcp.WithString("namespace", mcp.Description("Namespace to get exceptions from (optional)")),
-	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		args, ok := request.Params.Arguments.(map[string]interface{})
-		if !ok {
-			return mcp.NewToolResultError("Invalid arguments format"), nil
-		}
-
-		namespace, _ := args["namespace"].(string)
-		// In Kyverno v1.14.1, policy exceptions are managed through policies with specific annotations
-		// rather than a dedicated PolicyException resource. We'll list all policies and filter
-		// for those with the 'kyverno.io/policy-type: exception' annotation.
-		policies, err := kyvernoClient.kyvernoV1.Policies(namespace).List(ctx, metav1.ListOptions{})
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Error listing policies: %v", err)), nil
-		}
-
-		result := make(map[string][]string)
-		for _, policy := range policies.Items {
-			if policy.Annotations != nil && policy.Annotations["kyverno.io/policy-type"] == "exception" {
-				result[policy.Namespace] = append(result[policy.Namespace], policy.Name)
-			}
-		}
-
-		resultJSON, err := json.MarshalIndent(result, "", "  ")
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Error marshaling result: %v", err)), nil
-		}
-		return mcp.NewToolResultText(string(resultJSON)), nil
-	})
-
-	// Add tool to install Kyverno
-	s.AddTool(mcp.NewTool("install_kyverno",
-		mcp.WithDescription("Install Kyverno in the cluster using Helm"),
-		mcp.WithString("version", mcp.Description("Version of Kyverno to install (default: latest)")),
-		mcp.WithString("namespace", mcp.Description("Namespace to install Kyverno in (default: kyverno)")),
-	), func(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		args, ok := request.Params.Arguments.(map[string]interface{})
-		if !ok {
-			log.Printf("Install_kyverno: Error invalid arguments format")
-			return mcp.NewToolResultError("Invalid arguments format"), nil
-		}
-
-		version, _ := args["version"].(string)
-		if version == "" {
-			log.Println("Install_kyverno: 'version' not specified, defaulting to 'latest'. Note: 'latest' might fail; specific versions are preferred.")
-			version = "latest" // Consider changing to a specific default stable version if 'latest' is problematic
-		}
-
-		namespace, _ := args["namespace"].(string)
-		if namespace == "" {
-			log.Println("Install_kyverno: 'namespace' not specified, defaulting to 'kyverno'.")
-			namespace = "kyverno"
-		}
-		log.Printf("Install_kyverno: Attempting to install version '%s' in namespace '%s'", version, namespace)
-
-		settings := cli.New()
-		actionConfig := new(action.Configuration)
-
-		kubeconfigPath := ""
-		contextName := ""
-		if currentClient != nil {
-			kubeconfigPath = currentClient.kubeconfigPath
-			contextName = currentClient.contextName
-		}
-
-		if kubeconfigPath == "" {
-			home, err := os.UserHomeDir()
-			if err == nil {
-				kubeconfigPath = filepath.Join(home, ".kube", "config")
-				log.Printf("Install_kyverno: kubeconfigPath was empty, defaulted to: %s", kubeconfigPath)
-			} else {
-				log.Printf("Install_kyverno: kubeconfigPath was empty and could not determine home directory: %v. Helm will try its defaults.", err)
-				// Allow Helm to use its default kubeconfig loading if home dir fails for some reason
-			}
-		}
-		log.Printf("Install_kyverno: Using Kubeconfig: '%s', Context: '%s'", kubeconfigPath, contextName)
-
-		configFlags := genericclioptions.NewConfigFlags(true)
-		configFlags.KubeConfig = &kubeconfigPath
-		configFlags.Context = &contextName
-
-		if err := actionConfig.Init(
-			configFlags, // Use the configured flags for Helm initialization
-			namespace,
-			os.Getenv("HELM_DRIVER"),
-			func(format string, v ...interface{}) { log.Printf("[Helm]: "+format, v...) },
-		); err != nil {
-			log.Printf("Install_kyverno: Error initializing Helm action config: %v", err)
-			return mcp.NewToolResultError(fmt.Sprintf("Failed to initialize Helm action config: %v", err)), nil
-		}
-		log.Println("Install_kyverno: Helm action config initialized.")
-
-		log.Println("Install_kyverno: Adding Kyverno Helm repository (https://kyverno.github.io/kyverno/)...")
-		repoEntry := &repo.Entry{
-			Name: "kyverno",
-			URL:  "https://kyverno.github.io/kyverno/",
-		}
-		repoFile := settings.RepositoryConfig // Path to repositories.yaml e.g., ~/.config/helm/repositories.yaml
-		r, err := repo.LoadFile(repoFile)
-		if err != nil && !os.IsNotExist(err) {
-			log.Printf("Install_kyverno: Error loading Helm repository file '%s': %v", repoFile, err)
-			return mcp.NewToolResultError(fmt.Sprintf("failed to load Helm repository file: %v", err)), nil
-		}
-		if r == nil { // If file doesn't exist, repo.LoadFile returns a new empty File struct and no error
-			r = repo.NewFile()
-		}
-		if !r.Has(repoEntry.Name) {
-			r.Add(repoEntry)
-			if err := r.WriteFile(repoFile, 0644); err != nil {
-				log.Printf("Install_kyverno: Error writing Helm repository file '%s': %v", repoFile, err)
-				return mcp.NewToolResultError(fmt.Sprintf("failed to write Helm repository file: %v", err)), nil
-			}
-			log.Printf("Install_kyverno: Kyverno Helm repository '%s' added to '%s'.", repoEntry.Name, repoFile)
-		} else {
-			log.Printf("Install_kyverno: Kyverno Helm repository '%s' already exists in '%s'.", repoEntry.Name, repoFile)
-		}
-
-		// Note: Helm repository update logic (equivalent to 'helm repo update') has been removed
-		// due to 'action.NewRepoUpdate' being undefined.
-		// The LocateChart call below will attempt to find the chart in the added repository.
-		// If this fails consistently, a manual 'helm repo update' outside the MCP or a more specific
-		// SDK-based update mechanism might be needed.
-		// log.Println("Install_kyverno: Proceeding without explicit Helm repo update. LocateChart will attempt to find the chart.")
-
-		// Execute 'helm repo update' to refresh local chart repository cache
-		log.Println("Install_kyverno: Executing 'helm repo update'...")
-		cmd := exec.Command("helm", "repo", "update")
-		// Pass through current environment variables, which might include KUBECONFIG if set externally,
-		// though 'helm repo update' primarily uses Helm's own config files.
-		cmd.Env = os.Environ()
-		// If kubeconfigPath is set and valid, Helm commands run via exec.Command should pick it up if KUBECONFIG env var is set or if it's the default path.
-		// We can also explicitly set KUBECONFIG for the command if needed:
-		if kubeconfigPath != "" {
-			log.Printf("Install_kyverno: Explicitly setting KUBECONFIG=%s for 'helm repo update' command.", kubeconfigPath)
-			cmd.Env = append(os.Environ(), "KUBECONFIG="+kubeconfigPath)
-		}
-
-		var out bytes.Buffer
-		var stderr bytes.Buffer
-		cmd.Stdout = &out
-		cmd.Stderr = &stderr
-		if err := cmd.Run(); err != nil {
-			log.Printf("Install_kyverno: 'helm repo update' failed. Stdout: %s, Stderr: %s, Error: %v", out.String(), stderr.String(), err)
-			// Depending on strictness, we might return an error here or just log a warning.
-			// For now, let's be strict as chart location will likely fail if update fails.
-			return mcp.NewToolResultError(fmt.Sprintf("Failed to update Helm repositories: %v. Stderr: %s", err, stderr.String())), nil
-		}
-		log.Printf("Install_kyverno: 'helm repo update' completed. Stdout: %s", out.String())
-
-		installClient := action.NewInstall(actionConfig)
-		installClient.Namespace = namespace
-		installClient.ReleaseName = "kyverno" // Standard release name
-		installClient.Version = version
-		installClient.CreateNamespace = true
-		installClient.Wait = true
-		installClient.Timeout = 5 * time.Minute
-
-		chartName := "kyverno/kyverno" // Chart name in the format 'repoName/chartName'
-		log.Printf("Install_kyverno: Locating chart '%s' version '%s' using Helm settings...", chartName, version)
-		cp, err := installClient.ChartPathOptions.LocateChart(chartName, settings)
-		if err != nil {
-			log.Printf("Install_kyverno: Error locating chart '%s' version '%s': %v", chartName, version, err)
-			return mcp.NewToolResultError(fmt.Sprintf("Failed to locate chart '%s' (version: '%s'): %v. Check version and repo.", chartName, version, err)), nil
-		}
-		log.Printf("Install_kyverno: Chart '%s' version '%s' located at: %s", chartName, version, cp)
-
-		chartRequested, err := loader.Load(cp)
-		if err != nil {
-			log.Printf("Install_kyverno: Error loading chart from path '%s': %v", cp, err)
-			return mcp.NewToolResultError(fmt.Sprintf("Failed to load chart from %s: %v", cp, err)), nil
-		}
-		log.Printf("Install_kyverno: Chart '%s' loaded successfully.", chartRequested.Name())
-
-		log.Printf("Install_kyverno: Installing chart '%s' version '%s' as release '%s' in namespace '%s'...", chartRequested.Name(), chartRequested.Metadata.Version, installClient.ReleaseName, installClient.Namespace)
-		rel, err := installClient.Run(chartRequested, nil)
-		if err != nil {
-			log.Printf("Install_kyverno: Error installing Kyverno chart: %v", err)
-			return mcp.NewToolResultError(fmt.Sprintf("Failed to install Kyverno: %v", err)), nil
-		}
-
-		log.Printf("Install_kyverno: Kyverno chart installation initiated. Release: '%s', Status: '%s'", rel.Name, rel.Info.Status)
-		return mcp.NewToolResultText(fmt.Sprintf("Kyverno installed successfully: %s. Status: %s", rel.Name, rel.Info.Status)), nil
-	})
-
-	// Add tool to search Kyverno documentation
-	s.AddTool(mcp.NewTool("search_kyverno_docs",
-		mcp.WithDescription("Search Kyverno documentation using AWS Bedrock."),
-		mcp.WithString("query", mcp.Description("The search query string.")),
-		mcp.WithString("size", mcp.Description("Optional: Number of search results to return (default: 10). Should be a string representing an integer.")),
-	), func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		args, ok := request.Params.Arguments.(map[string]interface{})
-		if !ok {
-			return mcp.NewToolResultError("Error: invalid arguments format"), nil
-		}
-
-		query, ok := args["query"].(string)
-		if !ok || query == "" {
-			return mcp.NewToolResultError("query argument is missing or empty"), nil
-		}
-
-		log.Printf("Retrieving from Bedrock KB. Query: '%s', KB ID: '%s'", query, bedrockKnowledgeBaseID)
-
-		// Load AWS config
-		cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion(bedrockRegion))
-		if err != nil {
-			log.Printf("Error loading AWS SDK config for Bedrock Agent Runtime: %v", err)
-			return mcp.NewToolResultError(fmt.Sprintf("unable to load AWS SDK config: %v", err)), nil
-		}
-
-		// Create Bedrock Agent Runtime client
-		brAgentClient := bedrockagentruntime.NewFromConfig(cfg)
-
-		// Prepare the Retrieve API input
-		numberOfResults := int32(bedrockNumberOfResults) // Convert to int32 as required by SDK
-		retrieveInput := &bedrockagentruntime.RetrieveInput{
-			KnowledgeBaseId: aws.String(bedrockKnowledgeBaseID),
-			RetrievalQuery: &types.KnowledgeBaseQuery{
-				Text: aws.String(query),
-			},
-			RetrievalConfiguration: &types.KnowledgeBaseRetrievalConfiguration{
-				VectorSearchConfiguration: &types.KnowledgeBaseVectorSearchConfiguration{
-					NumberOfResults: &numberOfResults,
-				},
-			},
-		}
-
-		log.Printf("Calling Bedrock Agent Runtime Retrieve API for KB ID '%s'...", bedrockKnowledgeBaseID)
-		retrieveOutput, err := brAgentClient.Retrieve(ctx, retrieveInput)
-		if err != nil {
-			log.Printf("Error calling Bedrock Retrieve API: %v", err)
-			return mcp.NewToolResultError(fmt.Sprintf("failed to retrieve from Bedrock KB: %v", err)), nil
-		}
-
-		// Format the results
-		results := make([]map[string]interface{}, len(retrieveOutput.RetrievalResults))
-		for i, r := range retrieveOutput.RetrievalResults {
-			resultMap := map[string]interface{}{
-				"content": "",
-				"score":   0.0,
-			}
-			if r.Content != nil && r.Content.Text != nil {
-				resultMap["content"] = *r.Content.Text
-			}
-			if r.Score != nil {
-				resultMap["score"] = *r.Score
-			}
-			if r.Location != nil && r.Location.S3Location != nil && r.Location.S3Location.Uri != nil {
-				resultMap["location_s3_uri"] = *r.Location.S3Location.Uri
-			}
-			// Add other location types if needed (WEB, CONFLUENCE, SALESFORCE, SHAREPOINT)
-			results[i] = resultMap
-		}
-
-		formattedResponse, err := json.MarshalIndent(results, "", "  ")
-		if err != nil {
-			log.Printf("Error formatting Bedrock Retrieve API JSON response: %v", err)
-			return mcp.NewToolResultError(fmt.Sprintf("failed to format Bedrock Retrieve API JSON response: %v", err)), nil
-		}
-
-		log.Println("Successfully received response from Bedrock Retrieve API.")
-		return mcp.NewToolResultText(string(formattedResponse)), nil
+		return mcp.NewToolResultText(string(combinedOutput.String())), nil
 	})
 
 	// Start the MCP server
