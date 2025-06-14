@@ -42,6 +42,13 @@ var resourceTempFiles map[string]string
 // If empty, the default resolution logic from client-go is used.
 var kubeconfigPath string
 
+// awsconfigPath holds the path to the AWS config file supplied via the --awsconfig flag.
+// If empty, the default resolution logic (environment variable AWS_CONFIG_FILE or ~/.aws/config) is used.
+var awsconfigPath string
+
+// awsProfile holds the AWS profile name supplied via the --awsprofile flag.
+var awsProfile string
+
 //go:embed test.yaml
 var resource []byte
 
@@ -232,6 +239,8 @@ func main() {
 
 	// Define CLI flags
 	flag.StringVar(&kubeconfigPath, "kubeconfig", "", "Path to the kubeconfig file to use. If not provided, defaults are used.")
+	flag.StringVar(&awsconfigPath, "awsconfig", "", "Path to the AWS config file to use. If not provided, defaults to environment variable AWS_CONFIG_FILE or ~/.aws/config.")
+	flag.StringVar(&awsProfile, "awsprofile", "", "AWS profile to use (defaults to current profile).")
 
 	// Parse CLI flags early so subsequent init can rely on them
 	flag.Parse()
@@ -240,6 +249,16 @@ func main() {
 		// Ensure downstream libraries relying on KUBECONFIG honour the supplied path (e.g., Kyverno CLI helpers)
 		_ = os.Setenv("KUBECONFIG", kubeconfigPath)
 		log.Printf("Using kubeconfig file: %s", kubeconfigPath)
+	}
+
+	if awsconfigPath != "" {
+		_ = os.Setenv("AWS_CONFIG_FILE", awsconfigPath)
+		log.Printf("Using AWS config file: %s", awsconfigPath)
+	}
+
+	if awsProfile != "" {
+		_ = os.Setenv("AWS_PROFILE", awsProfile)
+		log.Printf("Using AWS profile: %s", awsProfile)
 	}
 
 	// Setup logging to standard output
