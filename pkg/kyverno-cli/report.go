@@ -2,7 +2,6 @@
 package kyvernocli
 
 import (
-	"fmt"
 	"time"
 
 	"github.com/kyverno/kyverno/api/kyverno"
@@ -44,15 +43,13 @@ func BuildPolicyReportResults(auditWarn bool, engineResponses ...engineapi.Engin
 					Name:       engineResponse.Resource.GetName(),
 					UID:        engineResponse.Resource.GetUID(),
 				}},
-				Scored:  true,
+				Scored:  scored,
 				Message: ruleResponse.Message(),
 			}
-			if ruleResponse.Status() == engineapi.RuleStatusSkip {
-				result.Result = policyreportv1alpha2.StatusSkip
-			} else if ruleResponse.Status() == engineapi.RuleStatusError {
+
+			// Determine the result status. Pass and Skip statuses are already filtered out earlier.
+			if ruleResponse.Status() == engineapi.RuleStatusError {
 				result.Result = policyreportv1alpha2.StatusError
-			} else if ruleResponse.Status() == engineapi.RuleStatusPass {
-				result.Result = policyreportv1alpha2.StatusPass
 			} else if ruleResponse.Status() == engineapi.RuleStatusFail {
 				if !scored {
 					result.Result = policyreportv1alpha2.StatusWarn
@@ -61,10 +58,12 @@ func BuildPolicyReportResults(auditWarn bool, engineResponses ...engineapi.Engin
 				} else {
 					result.Result = policyreportv1alpha2.StatusFail
 				}
+			} else if ruleResponse.Status() == engineapi.RuleStatusWarn {
+				result.Result = policyreportv1alpha2.StatusWarn
 			} else {
-				fmt.Println(ruleResponse)
+				// Fallback: treat any unforeseen status as an error to surface the issue clearly
+				result.Result = policyreportv1alpha2.StatusError
 			}
-			result.Message = ruleResponse.Message()
 			result.Source = kyverno.ValueKyvernoApp
 			result.Timestamp = now
 			result.Category = category

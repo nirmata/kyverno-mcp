@@ -32,12 +32,6 @@ var bestPracticesK8sPolicy []byte
 //go:embed policies/all.yaml
 var allPolicy []byte
 
-// Define a package-level map that stores the temporary file path for each embedded policy
-var policyTempFiles map[string]string
-
-// Define a package-level map that stores the temporary file path for each embedded resource
-var resourceTempFiles map[string]string
-
 // kubeconfigPath holds the path to the kubeconfig file supplied via the --kubeconfig flag.
 // If empty, the default resolution logic from client-go is used.
 var kubeconfigPath string
@@ -49,32 +43,36 @@ var awsconfigPath string
 // awsProfile holds the AWS profile name supplied via the --awsprofile flag.
 var awsProfile string
 
-//go:embed test.yaml
-var resource []byte
-
-func applyPolicy() string {
-	resourceTempFiles := os.TempDir() + "/test.yaml"
-
-	err := os.WriteFile(resourceTempFiles, resource, 0644)
-	if err != nil {
-		log.Printf("init: failed to create temp file for embedded resource: %v", err)
-		os.Exit(1)
+func applyPolicy(policyKey string, namespace string) string {
+	// Select the appropriate embedded policy content based on the requested key
+	var policyData []byte
+	switch policyKey {
+	case "pod-security":
+		policyData = podSecurityPolicy
+	case "rbac-best-practices":
+		policyData = rbacBestPracticesPolicy
+	case "best-practices-k8s":
+		policyData = bestPracticesK8sPolicy
+	default:
+		policyData = allPolicy
 	}
 
-	policyTempFiles := os.TempDir() + "/policies.yaml"
-
-	err = os.WriteFile(policyTempFiles, allPolicy, 0644)
-
-	if err != nil {
+	// Write the selected policy to a temporary file
+	policyTempFile := os.TempDir() + "/policies.yaml"
+	if err := os.WriteFile(policyTempFile, policyData, 0644); err != nil {
 		log.Printf("init: failed to create temp file for embedded policy: %v", err)
 		os.Exit(1)
 	}
 
+	// Use an empty string to indicate that Kyverno should scan all namespaces
+	if namespace == "all" {
+		namespace = ""
+	}
+
 	applyCommandConfig := &apply.ApplyCommandConfig{
-		PolicyPaths: []string{policyTempFiles},
-		//ResourcePaths: []string{resourceTempFiles},
+		PolicyPaths:  []string{policyTempFile},
 		Cluster:      true,
-		Namespace:    "default",
+		Namespace:    namespace,
 		PolicyReport: true,
 		OutputFormat: "json",
 	}
@@ -84,19 +82,17 @@ func applyPolicy() string {
 		log.Printf("applyPolicy: failed to apply policy: %v", err)
 		os.Exit(1)
 	}
+
 	results := kyvernocli.BuildPolicyReportResults(false, result.EngineResponses...)
 	jsonResults, err := json.MarshalIndent(results, "", "  ")
 	if err != nil {
 		log.Printf("applyPolicy: failed to marshal policy report results: %v", err)
 		os.Exit(1)
 	}
-	//log.Printf("Results: %v", string(jsonResults))
 	return string(jsonResults)
-
 }
 
 func listContexts(s *server.MCPServer) {
-
 	// Helper to build loading rules based on optional explicit kubeconfig path
 	newLoadingRules := func() *clientcmd.ClientConfigLoadingRules {
 		if kubeconfigPath != "" {
@@ -197,7 +193,6 @@ func switchContext(s *server.MCPServer) {
 }
 
 func scanCluster(s *server.MCPServer) {
-	// Create a tool to scan the cluster for resources matching a policy
 	log.Println("Registering tool: scan_cluster")
 	scanClusterTool := mcp.NewTool(
 		"scan_cluster",
@@ -206,7 +201,6 @@ func scanCluster(s *server.MCPServer) {
 		mcp.WithString("namespace", mcp.Description("Namespace to scan (default: all)")),
 	)
 
-	// Register the scan cluster tool
 	s.AddTool(scanClusterTool, func(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		args, ok := request.Params.Arguments.(map[string]interface{})
 		if !ok {
@@ -223,27 +217,28 @@ func scanCluster(s *server.MCPServer) {
 			policyKey = "all"
 		}
 
-		results := applyPolicy()
-
-		// Format the collected responses as pretty-printed JSON so callers can parse them.
-		respJSON, err := json.MarshalIndent(results, "", "  ")
-		if err != nil {
-			return mcp.NewToolResultError(fmt.Sprintf("Failed to serialise responses: %v", err)), nil
-		}
-
-		return mcp.NewToolResultText(string(respJSON)), nil
+		results := applyPolicy(policyKey, namespace)
+		return mcp.NewToolResultText(results), nil
 	})
 }
 
 func main() {
-
-	// Define CLI flags
-	flag.StringVar(&kubeconfigPath, "kubeconfig", "", "Path to the kubeconfig file to use. If not provided, defaults are used.")
+	// Define CLI flags (guard against duplicate registration from imported packages)
+	if flag.Lookup("kubeconfig") == nil {
+		flag.StringVar(&kubeconfigPath, "kubeconfig", "", "Path to the kubeconfig file to use. If not provided, defaults are used.")
+	}
 	flag.StringVar(&awsconfigPath, "awsconfig", "", "Path to the AWS config file to use. If not provided, defaults to environment variable AWS_CONFIG_FILE or ~/.aws/config.")
 	flag.StringVar(&awsProfile, "awsprofile", "", "AWS profile to use (defaults to current profile).")
 
 	// Parse CLI flags early so subsequent init can rely on them
 	flag.Parse()
+
+	// If the kubeconfig flag was registered elsewhere, capture its value
+	if kubeconfigPath == "" {
+		if kubeFlag := flag.Lookup("kubeconfig"); kubeFlag != nil {
+			kubeconfigPath = kubeFlag.Value.String()
+		}
+	}
 
 	if kubeconfigPath != "" {
 		// Ensure downstream libraries relying on KUBECONFIG honour the supplied path (e.g., Kyverno CLI helpers)
