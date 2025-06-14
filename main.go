@@ -43,7 +43,7 @@ var awsconfigPath string
 // awsProfile holds the AWS profile name supplied via the --awsprofile flag.
 var awsProfile string
 
-func applyPolicy(policyKey string, namespace string) string {
+func applyPolicy(policyKey string, namespace string) (string, error) {
 	// Select the appropriate embedded policy content based on the requested key
 	var policyData []byte
 	switch policyKey {
@@ -57,11 +57,28 @@ func applyPolicy(policyKey string, namespace string) string {
 		policyData = allPolicy
 	}
 
-	// Write the selected policy to a temporary file
-	policyTempFile := os.TempDir() + "/policies.yaml"
-	if err := os.WriteFile(policyTempFile, policyData, 0644); err != nil {
-		log.Printf("init: failed to create temp file for embedded policy: %v", err)
-		os.Exit(1)
+	// Create a uniquely named temporary file to avoid collisions between concurrent requests.
+	tmpFile, err := os.CreateTemp("", "kyverno-policy-*.yaml")
+	if err != nil {
+		return "", fmt.Errorf("failed to create temp policy file: %w", err)
+	}
+
+	// Ensure the file is cleaned up after we have finished processing.
+	// The cleanup is deferred *after* the temp file is successfully created so that
+	// the file is always removed regardless of subsequent failures.
+	defer func(name string) {
+		_ = os.Remove(name)
+	}(tmpFile.Name())
+
+	// Write the selected policy content to the temporary file
+	if _, err := tmpFile.Write(policyData); err != nil {
+		tmpFile.Close()
+		return "", fmt.Errorf("failed to write policy data to temp file: %w", err)
+	}
+
+	// Flush the file to disk before it's used by downstream helpers
+	if err := tmpFile.Close(); err != nil {
+		return "", fmt.Errorf("failed to close temp policy file: %w", err)
 	}
 
 	// Use an empty string to indicate that Kyverno should scan all namespaces
@@ -70,7 +87,7 @@ func applyPolicy(policyKey string, namespace string) string {
 	}
 
 	applyCommandConfig := &apply.ApplyCommandConfig{
-		PolicyPaths:  []string{policyTempFile},
+		PolicyPaths:  []string{tmpFile.Name()},
 		Cluster:      true,
 		Namespace:    namespace,
 		PolicyReport: true,
@@ -79,17 +96,16 @@ func applyPolicy(policyKey string, namespace string) string {
 
 	result, err := kyvernocli.ApplyCommandHelper(applyCommandConfig)
 	if err != nil {
-		log.Printf("applyPolicy: failed to apply policy: %v", err)
-		os.Exit(1)
+		return "", fmt.Errorf("failed to apply policy: %w", err)
 	}
 
 	results := kyvernocli.BuildPolicyReportResults(false, result.EngineResponses...)
 	jsonResults, err := json.MarshalIndent(results, "", "  ")
 	if err != nil {
-		log.Printf("applyPolicy: failed to marshal policy report results: %v", err)
-		os.Exit(1)
+		return "", fmt.Errorf("failed to marshal policy report results: %w", err)
 	}
-	return string(jsonResults)
+
+	return string(jsonResults), nil
 }
 
 func listContexts(s *server.MCPServer) {
@@ -156,38 +172,34 @@ func switchContext(s *server.MCPServer) {
 			return mcp.NewToolResultError(fmt.Sprintf("Invalid context parameter: %v", err)), nil
 		}
 
-		// Load the Kubernetes configuration from the specified kubeconfig or default location
-		loadingRules := func() *clientcmd.ClientConfigLoadingRules {
-			if kubeconfigPath != "" {
-				return &clientcmd.ClientConfigLoadingRules{ExplicitPath: kubeconfigPath}
-			}
-			return clientcmd.NewDefaultClientConfigLoadingRules()
-		}()
-		configOverrides := &clientcmd.ConfigOverrides{
-			CurrentContext: contextName,
+		pathOpts := clientcmd.NewDefaultPathOptions()
+		if kubeconfigPath != "" {
+			pathOpts.LoadingRules.ExplicitPath = kubeconfigPath
 		}
 
-		// Create a new config with the overridden context
-		config := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, configOverrides)
-
-		// Get the raw config to verify the context exists
-		rawConfig, err := config.RawConfig()
+		cfg, err := pathOpts.GetStartingConfig()
 		if err != nil {
 			log.Printf("Error in 'switch_context': Error loading kubeconfig: %v", err)
 			return mcp.NewToolResultError(fmt.Sprintf("Error loading kubeconfig: %v", err)), nil
 		}
 
-		// Verify the requested context exists
-		if _, exists := rawConfig.Contexts[contextName]; !exists {
-			availableContexts := make([]string, 0, len(rawConfig.Contexts))
-			for name := range rawConfig.Contexts {
+		if _, ok := cfg.Contexts[contextName]; !ok {
+			availableContexts := make([]string, 0, len(cfg.Contexts))
+			for name := range cfg.Contexts {
 				availableContexts = append(availableContexts, name)
 			}
 			log.Printf("Error in 'switch_context': Context '%s' not found. Available: %v", contextName, availableContexts)
 			return mcp.NewToolResultError(fmt.Sprintf("Context '%s' not found. Available contexts: %v", contextName, availableContexts)), nil
 		}
 
-		return mcp.NewToolResultText(fmt.Sprintf("Switched to context: %s", contextName)), nil
+		cfg.CurrentContext = contextName
+
+		if err := clientcmd.ModifyConfig(pathOpts, *cfg, false); err != nil {
+			log.Printf("Error in 'switch_context': Error writing kubeconfig: %v", err)
+			return mcp.NewToolResultError(fmt.Sprintf("Error writing kubeconfig: %v", err)), nil
+		}
+
+		return mcp.NewToolResultText(fmt.Sprintf("Switched to context: %s (saved to kubeconfig)", contextName)), nil
 	},
 	)
 }
@@ -217,7 +229,11 @@ func scanCluster(s *server.MCPServer) {
 			policyKey = "all"
 		}
 
-		results := applyPolicy(policyKey, namespace)
+		results, err := applyPolicy(policyKey, namespace)
+		if err != nil {
+			// Surface the error back to the MCP client without terminating the server.
+			return mcp.NewToolResultError(err.Error()), nil
+		}
 		return mcp.NewToolResultText(results), nil
 	})
 }
