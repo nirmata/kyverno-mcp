@@ -1,3 +1,4 @@
+// Package kyverno provides a shim for the Kyverno CLI.
 package kyverno
 
 import (

@@ -1,3 +1,4 @@
+// Package tools provides tools for the MCP server.
 package tools
 
 import (
