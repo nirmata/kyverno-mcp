@@ -5,8 +5,6 @@ A Model Context Protocol (MCP) server that provides Kyverno policy management ca
 ## Prerequisites
 
 - Go 1.16 or higher
-- Active VPN connection to access private EKS clusters
-- Kubernetes cluster with Kyverno installed (EKS)
 - `kubectl` configured with access to your cluster
 - Kyverno CLI (optional, for local testing)
 
@@ -58,10 +56,6 @@ A Model Context Protocol (MCP) server that provides Kyverno policy management ca
 - `--kubeconfig` (string): Path to the kubeconfig file (defaults to the value of $KUBECONFIG, or ~/.kube/config if unset)
 - `--awsconfig` (string): Path to the AWS config file (defaults to the value of $AWS_CONFIG_FILE, or ~/.aws/config if unset)
 - `--awsprofile` (string): AWS profile to use (defaults to the current profile)
-
-## Connecting to an EKS cluster
-
-Ensure your VPN is connected before running the server. The EKS API endpoints are only reachable while on the corporate VPN. Attempting to start the server without VPN access will result in connection errors.
 
 ## Available Tools
 
