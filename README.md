@@ -4,9 +4,7 @@ A Model Context Protocol (MCP) server that provides Kyverno policy management ca
 
 ## Prerequisites
 
-- Go 1.16 or higher
-- `kubectl` configured with access to your cluster
-- Kyverno CLI (optional, for local testing)
+- Go 1.24 or higher (for building the binary)
 
 ## Installation
 
@@ -96,7 +94,7 @@ Scan the cluster using embedded Kyverno policy sets.
 **Example Request:**
 ```json
 {
-  "tool": "scan_cluster",
+  "tool": "apply_policies",
   "policySets": "all",
   "namespace": "default"
 }

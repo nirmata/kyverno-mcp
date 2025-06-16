@@ -38,7 +38,7 @@ func init() {
 		fmt.Fprintln(flag.CommandLine.Output(), "\nAvailable tools exposed over MCP:")
 		fmt.Fprintln(flag.CommandLine.Output(), "  list_contexts   – List all available Kubernetes contexts")
 		fmt.Fprintln(flag.CommandLine.Output(), "  switch_context  – Switch to a different Kubernetes context (requires --context)")
-		fmt.Fprintln(flag.CommandLine.Output(), "  scan_cluster    – Scan cluster resources using an embedded Kyverno policy")
+		fmt.Fprintln(flag.CommandLine.Output(), "  apply_policies  – Apply policies to a cluster")
 
 		// Terminate after printing help to match standard behaviour.
 	}
@@ -103,7 +103,7 @@ func main() {
 	// Register tools
 	tools.ListContexts(s)
 	tools.SwitchContext(s)
-	tools.ScanCluster(s)
+	tools.ApplyPolicies(s)
 
 	// Start the MCP server
 	log.Println("Starting MCP server on stdio...")

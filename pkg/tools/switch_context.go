@@ -14,7 +14,7 @@ func SwitchContext(s *server.MCPServer) {
 	// Switch context tool
 	log.Println("Registering tool: switch_context")
 	s.AddTool(mcp.NewTool("switch_context",
-		mcp.WithDescription("Switch to a different Kubernetes context"),
+		mcp.WithDescription("Switch to a different Kubernetes context. If no context is provided, the default context will be used."),
 		mcp.WithString("context",
 			mcp.Description("Name of the context to switch to"),
 			mcp.Required(),
@@ -28,9 +28,6 @@ func SwitchContext(s *server.MCPServer) {
 		}
 
 		pathOpts := clientcmd.NewDefaultPathOptions()
-		if kubeconfigPath != "" {
-			pathOpts.LoadingRules.ExplicitPath = kubeconfigPath
-		}
 
 		cfg, err := pathOpts.GetStartingConfig()
 		if err != nil {

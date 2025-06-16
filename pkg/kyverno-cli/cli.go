@@ -1,5 +1,5 @@
-// Package kyvernocli provides a shim for the Kyverno CLI.
-package kyvernocli
+// Package kyverno provides a shim for the Kyverno CLI.
+package kyverno
 
 import (
 	"time"
@@ -69,6 +69,16 @@ func BuildPolicyReportResults(auditWarn bool, engineResponses ...engineapi.Engin
 			result.Category = category
 			result.Severity = policyreportv1alpha2.PolicySeverity(severity)
 			results = append(results, result)
+		}
+	}
+	if results == nil {
+		results = []policyreportv1alpha2.PolicyReportResult{
+			{
+				Policy:  "No policies applied",
+				Rule:    "No policies applied",
+				Result:  policyreportv1alpha2.StatusSkip,
+				Message: "No policies applied",
+			},
 		}
 	}
 	return results

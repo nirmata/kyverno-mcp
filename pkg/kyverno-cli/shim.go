@@ -1,4 +1,4 @@
-package kyvernocli
+package kyverno
 
 import (
 	"bufio"

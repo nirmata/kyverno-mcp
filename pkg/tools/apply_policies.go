@@ -4,9 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	kyvernocli "kyverno-mcp/pkg/kyverno-cli"
+	kyverno "kyverno-mcp/pkg/kyverno-cli"
 	"log"
 	"os"
+	"strings"
 
 	"github.com/kyverno/kyverno/cmd/cli/kubectl-kyverno/commands/apply"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -22,10 +23,12 @@ var podSecurityPolicy []byte
 var rbacBestPracticesPolicy []byte
 
 //go:embed policies/kubernetes-best-practices.yaml
-var bestPracticesK8sPolicy []byte
+var kubernetesBestPracticesPolicy []byte
 
-//go:embed policies/all.yaml
-var allPolicy []byte
+func defaultPolicies() []byte {
+	combinedPolicy := strings.TrimSpace(string(podSecurityPolicy)) + "\n---\n" + strings.TrimSpace(string(rbacBestPracticesPolicy)) + "\n---\n" + strings.TrimSpace(string(kubernetesBestPracticesPolicy))
+	return []byte(combinedPolicy)
+}
 
 func applyPolicy(policyKey string, namespace string) (string, error) {
 	// Select the appropriate embedded policy content based on the requested key
@@ -35,10 +38,10 @@ func applyPolicy(policyKey string, namespace string) (string, error) {
 		policyData = podSecurityPolicy
 	case "rbac-best-practices":
 		policyData = rbacBestPracticesPolicy
-	case "best-practices-k8s":
-		policyData = bestPracticesK8sPolicy
+	case "kubernetes-best-practices":
+		policyData = kubernetesBestPracticesPolicy
 	default:
-		policyData = allPolicy
+		policyData = defaultPolicies()
 	}
 
 	// Create a uniquely named temporary file to avoid collisions between concurrent requests.
@@ -65,11 +68,6 @@ func applyPolicy(policyKey string, namespace string) (string, error) {
 		return "", fmt.Errorf("failed to close temp policy file: %w", err)
 	}
 
-	// Use an empty string to indicate that Kyverno should scan all namespaces
-	if namespace == "all" {
-		namespace = ""
-	}
-
 	applyCommandConfig := &apply.ApplyCommandConfig{
 		PolicyPaths:  []string{tmpFile.Name()},
 		Cluster:      true,
@@ -78,12 +76,12 @@ func applyPolicy(policyKey string, namespace string) (string, error) {
 		OutputFormat: "json",
 	}
 
-	result, err := kyvernocli.ApplyCommandHelper(applyCommandConfig)
+	result, err := kyverno.ApplyCommandHelper(applyCommandConfig)
 	if err != nil {
 		return "", fmt.Errorf("failed to apply policy: %w", err)
 	}
 
-	results := kyvernocli.BuildPolicyReportResults(false, result.EngineResponses...)
+	results := kyverno.BuildPolicyReportResults(false, result.EngineResponses...)
 	jsonResults, err := json.MarshalIndent(results, "", "  ")
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal policy report results: %w", err)
@@ -92,32 +90,32 @@ func applyPolicy(policyKey string, namespace string) (string, error) {
 	return string(jsonResults), nil
 }
 
-func ScanCluster(s *server.MCPServer) {
-	log.Println("Registering tool: scan_cluster")
-	scanClusterTool := mcp.NewTool(
-		"scan_cluster",
-		mcp.WithDescription("Apply Kyverno policies to Kubernetes resources in a cluster"),
-		mcp.WithString("policySets", mcp.Description("Policy set key: pod-security, rbac-best-practices, best-practices-k8s, all (default: all).")),
-		mcp.WithString("namespace", mcp.Description("Namespace to scan (default: all)")),
+func ApplyPolicies(s *server.MCPServer) {
+	log.Println("Registering tool: apply_policies")
+	applyPoliciesTool := mcp.NewTool(
+		"apply_policies",
+		mcp.WithDescription("Apply Kyverno policies to Kubernetes resources in a cluster. If no namespace is provided, the policies will be applied to the default namespace."),
+		mcp.WithString("policySets", mcp.Description("Policy set key: pod-security, rbac-best-practices, kubernetes-best-practices, all (default: all).")),
+		mcp.WithString("namespace", mcp.Description("Namespace to apply policies to (default: default)")),
 	)
 
-	s.AddTool(scanClusterTool, func(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		args, ok := request.Params.Arguments.(map[string]interface{})
+	s.AddTool(applyPoliciesTool, func(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		args, ok := request.Params.Arguments.(map[string]any)
 		if !ok {
 			return mcp.NewToolResultError("Error: invalid arguments format"), nil
 		}
 
-		namespace, _ := args["namespace"].(string)
-		if namespace == "" {
-			namespace = "all"
+		policySets := "all"
+		if args["policySets"] != nil {
+			policySets = args["policySets"].(string)
 		}
 
-		policyKey, _ := args["policySets"].(string)
-		if policyKey == "" {
-			policyKey = "all"
+		namespace := "default"
+		if args["namespace"] != nil {
+			namespace = args["namespace"].(string)
 		}
 
-		results, err := applyPolicy(policyKey, namespace)
+		results, err := applyPolicy(policySets, namespace)
 		if err != nil {
 			// Surface the error back to the MCP client without terminating the server.
 			return mcp.NewToolResultError(err.Error()), nil
