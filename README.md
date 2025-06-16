@@ -52,8 +52,6 @@ A Model Context Protocol (MCP) server that provides Kyverno policy management ca
 ## Command Line Flags
 
 - `--kubeconfig` (string): Path to the kubeconfig file (defaults to the value of $KUBECONFIG, or ~/.kube/config if unset)
-- `--awsconfig` (string): Path to the AWS config file (defaults to the value of $AWS_CONFIG_FILE, or ~/.aws/config if unset)
-- `--awsprofile` (string): AWS profile to use (defaults to the current profile)
 
 ## Available Tools
 
@@ -88,8 +86,8 @@ Switch to a different Kubernetes context.
 Scan the cluster using embedded Kyverno policy sets.
 
 **Parameters:**
-- `policySets` (string, optional): Policy set key: `pod-security`, `rbac-best-practices`, `best-practices-k8s`, or `all` (default: `all`)
-- `namespace` (string, optional): Namespace to scan (default: `all`)
+- `policySets` (string, optional): Policy set key: `pod-security`, `rbac-best-practices`, `kubernetes-best-practices`, or `all` (default: `all`)
+- `namespace` (string, optional): Namespace to apply policies to (default: `default`)
 
 **Example Request:**
 ```json
