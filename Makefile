@@ -1,6 +1,6 @@
 # Makefile for kyverno-mcp
 #
-# This Makefile provides a set of commands to build, test, run,
+# This Makefile provides a set of commands to build, run,
 # and manage the kyverno-mcp project.
 
 # Default target to run when no target is specified.
@@ -43,11 +43,6 @@ help:
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "  %-20s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 # --- Build Tasks ---
-build-recursive: ## Build the binary using dev script (recursive for all modules)
-	@echo "λ Building all modules (recursive using dev script)..."
-	mkdir -p $(BIN_DIR)
-	./dev/ci/presubmits/go-build.sh
-
 build: ## Build single binary for the current platform
 	@echo "λ Building $(BINARY_NAME) for current platform..."
 	mkdir -p $(BIN_DIR)
@@ -61,31 +56,20 @@ run: ## Run the application
 # --- Code Quality Tasks (using dev scripts) ---
 fmt: ## Format code using dev script
 	@echo "λ Formatting code (using dev script)..."
-	./dev/tasks/format.sh
+	go fmt ./...
 
 vet: ## Run go vet using dev script
 	@echo "λ Running go vet (using dev script)..."
-	./dev/ci/presubmits/go-vet.sh
+	go vet ./...
 
 tidy: ## Tidy go modules using dev script
 	@echo "λ Tidying go modules (using dev script)..."
-	./dev/tasks/gomod.sh
-
-# --- Verification Tasks ---
-verify-format: ## Verify code formatting
-	@echo "λ Verifying code formatting..."
-	./dev/tasks/format.sh
+	go mod tidy
 
 # --- Combined Tasks ---
 # 'check' depends on other verification tasks. They will run as prerequisites.
-check: verify-format build-recursive vet ## Run all verification checks (presubmit-style)
+check: fmt vet tidy build ## Run all verification checks (presubmit-style)
 	@echo "λ All checks completed."
-
-# --- Development Workflow ---
-# 'dev' depends on the 'build' target.
-dev: build ## Development mode - build and run
-	@echo "λ Starting $(BINARY_NAME) in dev mode..."
-	$(BINARY_PATH)
 
 # --- Maintenance Tasks ---
 clean: ## Clean build artifacts
@@ -108,8 +92,3 @@ install: build ## Install the binary to $(GOPATH_BIN)
 	@echo "λ Installing $(BINARY_NAME) to $(GOPATH_BIN)..."
 	cp $(BINARY_PATH) $(GOPATH_BIN)/
 	@echo "$(BINARY_NAME) installed."
-
-# --- Testing ---
-test: ## Run tests
-	@echo "λ Running tests..."
-	go test ./...
