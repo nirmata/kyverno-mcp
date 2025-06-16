@@ -96,7 +96,7 @@ func ScanCluster(s *server.MCPServer) {
 	log.Println("Registering tool: scan_cluster")
 	scanClusterTool := mcp.NewTool(
 		"scan_cluster",
-		mcp.WithDescription("Scan cluster resources using an embedded Kyverno policy"),
+		mcp.WithDescription("Apply Kyverno policies to Kubernetes resources in a cluster"),
 		mcp.WithString("policySets", mcp.Description("Policy set key: pod-security, rbac-best-practices, best-practices-k8s, all (default: all).")),
 		mcp.WithString("namespace", mcp.Description("Namespace to scan (default: all)")),
 	)
