@@ -64,6 +64,7 @@ vet: ## Run go vet using go vet
 
 tidy: ## Tidy go modules using go mod tidy
 	@echo "λ Tidying go modules (using go mod tidy)..."
+	rm -f go.sum
 	go mod tidy
 
 # --- Combined Tasks ---
@@ -75,6 +76,7 @@ check: fmt vet tidy build ## Run all verification checks
 clean: ## Clean build artifacts
 	@echo "λ Cleaning build artifacts..."
 	rm -rf $(BIN_DIR)
+	go mod tidy
 
 deps: ## Download Go module dependencies
 	@echo "λ Downloading Go module dependencies..."
