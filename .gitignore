@@ -1,5 +1,6 @@
 kyverno-mcp
 .windsurf/
-
-# YoYo AI version control directory
 .yoyo/
+
+.cursor/
+.DS_Store
