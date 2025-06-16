@@ -53,22 +53,22 @@ run: ## Run the application
 	@echo "λ Running $(BINARY_NAME) from source..."
 	go run $(CMD_DIR)
 
-# --- Code Quality Tasks (using dev scripts) ---
-fmt: ## Format code using dev script
-	@echo "λ Formatting code (using dev script)..."
+# --- Code Quality Tasks ---
+fmt: ## Format code using go fmt
+	@echo "λ Formatting code (using go fmt)..."
 	go fmt ./...
 
-vet: ## Run go vet using dev script
-	@echo "λ Running go vet (using dev script)..."
+vet: ## Run go vet using go vet
+	@echo "λ Running go vet (using go vet)..."
 	go vet ./...
 
-tidy: ## Tidy go modules using dev script
-	@echo "λ Tidying go modules (using dev script)..."
+tidy: ## Tidy go modules using go mod tidy
+	@echo "λ Tidying go modules (using go mod tidy)..."
 	go mod tidy
 
 # --- Combined Tasks ---
 # 'check' depends on other verification tasks. They will run as prerequisites.
-check: fmt vet tidy build ## Run all verification checks (presubmit-style)
+check: fmt vet tidy build ## Run all verification checks
 	@echo "λ All checks completed."
 
 # --- Maintenance Tasks ---
