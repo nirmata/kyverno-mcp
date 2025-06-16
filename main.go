@@ -3,34 +3,15 @@
 package main
 
 import (
-	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
-	kyvernocli "kyverno-mcp/pkg/kyverno-cli"
+	"kyverno-mcp/pkg/tools"
 	"log"
 	"os"
 	"time"
 
-	_ "embed"
-
-	"github.com/kyverno/kyverno/cmd/cli/kubectl-kyverno/commands/apply"
-	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
-	"k8s.io/client-go/tools/clientcmd"
 )
-
-//go:embed policies/pod-security.yaml
-var podSecurityPolicy []byte
-
-//go:embed policies/rbac-best-practices.yaml
-var rbacBestPracticesPolicy []byte
-
-//go:embed policies/kubernetes-best-practices.yaml
-var bestPracticesK8sPolicy []byte
-
-//go:embed policies/all.yaml
-var allPolicy []byte
 
 // kubeconfigPath holds the path to the kubeconfig file supplied via the --kubeconfig flag.
 // If empty, the default resolution logic from client-go is used.
@@ -43,199 +24,24 @@ var awsconfigPath string
 // awsProfile holds the AWS profile name supplied via the --awsprofile flag.
 var awsProfile string
 
-func applyPolicy(policyKey string, namespace string) (string, error) {
-	// Select the appropriate embedded policy content based on the requested key
-	var policyData []byte
-	switch policyKey {
-	case "pod-security":
-		policyData = podSecurityPolicy
-	case "rbac-best-practices":
-		policyData = rbacBestPracticesPolicy
-	case "best-practices-k8s":
-		policyData = bestPracticesK8sPolicy
-	default:
-		policyData = allPolicy
+func init() {
+	flag.Usage = func() {
+		// Header
+		fmt.Fprintf(flag.CommandLine.Output(), "\nKyverno MCP Server – a Model-Context-Protocol server for Kyverno\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "Usage: %s [flags]\n\n", os.Args[0])
+
+		// Flags
+		fmt.Fprintln(flag.CommandLine.Output(), "Flags:")
+		flag.PrintDefaults()
+
+		// Tooling section – keep this in sync with tools registered in pkg/tools.
+		fmt.Fprintln(flag.CommandLine.Output(), "\nAvailable tools exposed over MCP:")
+		fmt.Fprintln(flag.CommandLine.Output(), "  list_contexts   – List all available Kubernetes contexts")
+		fmt.Fprintln(flag.CommandLine.Output(), "  switch_context  – Switch to a different Kubernetes context (requires --context)")
+		fmt.Fprintln(flag.CommandLine.Output(), "  scan_cluster    – Scan cluster resources using an embedded Kyverno policy")
+
+		// Terminate after printing help to match standard behaviour.
 	}
-
-	// Create a uniquely named temporary file to avoid collisions between concurrent requests.
-	tmpFile, err := os.CreateTemp("", "kyverno-policy-*.yaml")
-	if err != nil {
-		return "", fmt.Errorf("failed to create temp policy file: %w", err)
-	}
-
-	// Ensure the file is cleaned up after we have finished processing.
-	// The cleanup is deferred *after* the temp file is successfully created so that
-	// the file is always removed regardless of subsequent failures.
-	defer func(name string) {
-		_ = os.Remove(name)
-	}(tmpFile.Name())
-
-	// Write the selected policy content to the temporary file
-	if _, err := tmpFile.Write(policyData); err != nil {
-		tmpFile.Close()
-		return "", fmt.Errorf("failed to write policy data to temp file: %w", err)
-	}
-
-	// Flush the file to disk before it's used by downstream helpers
-	if err := tmpFile.Close(); err != nil {
-		return "", fmt.Errorf("failed to close temp policy file: %w", err)
-	}
-
-	// Use an empty string to indicate that Kyverno should scan all namespaces
-	if namespace == "all" {
-		namespace = ""
-	}
-
-	applyCommandConfig := &apply.ApplyCommandConfig{
-		PolicyPaths:  []string{tmpFile.Name()},
-		Cluster:      true,
-		Namespace:    namespace,
-		PolicyReport: true,
-		OutputFormat: "json",
-	}
-
-	result, err := kyvernocli.ApplyCommandHelper(applyCommandConfig)
-	if err != nil {
-		return "", fmt.Errorf("failed to apply policy: %w", err)
-	}
-
-	results := kyvernocli.BuildPolicyReportResults(false, result.EngineResponses...)
-	jsonResults, err := json.MarshalIndent(results, "", "  ")
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal policy report results: %w", err)
-	}
-
-	return string(jsonResults), nil
-}
-
-func listContexts(s *server.MCPServer) {
-	// Helper to build loading rules based on optional explicit kubeconfig path
-	newLoadingRules := func() *clientcmd.ClientConfigLoadingRules {
-		if kubeconfigPath != "" {
-			return &clientcmd.ClientConfigLoadingRules{ExplicitPath: kubeconfigPath}
-		}
-		return clientcmd.NewDefaultClientConfigLoadingRules()
-	}
-
-	// Add a tool to list available contexts
-	log.Println("Registering tool: list_contexts")
-	s.AddTool(mcp.NewTool("list_contexts",
-		mcp.WithDescription("List all available Kubernetes contexts"),
-	), func(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		log.Println("Tool 'list_contexts' invoked.")
-		// Load the Kubernetes configuration from the specified kubeconfig or default location
-		loadingRules := newLoadingRules()
-		configOverrides := &clientcmd.ConfigOverrides{}
-
-		config := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, configOverrides)
-		rawConfig, err := config.RawConfig()
-		if err != nil {
-			log.Printf("Error in 'list_contexts': failed to load kubeconfig: %v", err)
-			return mcp.NewToolResultError(fmt.Sprintf("Error loading kubeconfig: %v", err)), nil
-		}
-
-		// Extract context names
-		var contexts []string
-		for name := range rawConfig.Contexts {
-			contexts = append(contexts, name)
-		}
-
-		// Return the list of contexts as a JSON array
-		result := map[string]interface{}{
-			"available_contexts": contexts,
-		}
-
-		resultJSON, err := json.MarshalIndent(result, "", "  ")
-		if err != nil {
-			log.Printf("Error in 'list_contexts': failed to format result: %v", err)
-			return mcp.NewToolResultError(fmt.Sprintf("Error formatting result: %v", err)), nil
-		}
-
-		return mcp.NewToolResultText(string(resultJSON)), nil
-	})
-}
-
-func switchContext(s *server.MCPServer) {
-	// Switch context tool
-	log.Println("Registering tool: switch_context")
-	s.AddTool(mcp.NewTool("switch_context",
-		mcp.WithDescription("Switch to a different Kubernetes context"),
-		mcp.WithString("context",
-			mcp.Description("Name of the context to switch to"),
-			mcp.Required(),
-		),
-	), func(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		// Get the context parameter
-		contextName, err := request.RequireString("context")
-		if err != nil {
-			log.Printf("Error in 'switch_context': Invalid context parameter: %v", err)
-			return mcp.NewToolResultError(fmt.Sprintf("Invalid context parameter: %v", err)), nil
-		}
-
-		pathOpts := clientcmd.NewDefaultPathOptions()
-		if kubeconfigPath != "" {
-			pathOpts.LoadingRules.ExplicitPath = kubeconfigPath
-		}
-
-		cfg, err := pathOpts.GetStartingConfig()
-		if err != nil {
-			log.Printf("Error in 'switch_context': Error loading kubeconfig: %v", err)
-			return mcp.NewToolResultError(fmt.Sprintf("Error loading kubeconfig: %v", err)), nil
-		}
-
-		if _, ok := cfg.Contexts[contextName]; !ok {
-			availableContexts := make([]string, 0, len(cfg.Contexts))
-			for name := range cfg.Contexts {
-				availableContexts = append(availableContexts, name)
-			}
-			log.Printf("Error in 'switch_context': Context '%s' not found. Available: %v", contextName, availableContexts)
-			return mcp.NewToolResultError(fmt.Sprintf("Context '%s' not found. Available contexts: %v", contextName, availableContexts)), nil
-		}
-
-		cfg.CurrentContext = contextName
-
-		if err := clientcmd.ModifyConfig(pathOpts, *cfg, false); err != nil {
-			log.Printf("Error in 'switch_context': Error writing kubeconfig: %v", err)
-			return mcp.NewToolResultError(fmt.Sprintf("Error writing kubeconfig: %v", err)), nil
-		}
-
-		return mcp.NewToolResultText(fmt.Sprintf("Switched to context: %s (saved to kubeconfig)", contextName)), nil
-	},
-	)
-}
-
-func scanCluster(s *server.MCPServer) {
-	log.Println("Registering tool: scan_cluster")
-	scanClusterTool := mcp.NewTool(
-		"scan_cluster",
-		mcp.WithDescription("Scan cluster resources using an embedded Kyverno policy"),
-		mcp.WithString("policySets", mcp.Description("Policy set key: pod-security, rbac-best-practices, best-practices-k8s, all (default: all).")),
-		mcp.WithString("namespace", mcp.Description("Namespace to scan (default: all)")),
-	)
-
-	s.AddTool(scanClusterTool, func(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		args, ok := request.Params.Arguments.(map[string]interface{})
-		if !ok {
-			return mcp.NewToolResultError("Error: invalid arguments format"), nil
-		}
-
-		namespace, _ := args["namespace"].(string)
-		if namespace == "" {
-			namespace = "all"
-		}
-
-		policyKey, _ := args["policySets"].(string)
-		if policyKey == "" {
-			policyKey = "all"
-		}
-
-		results, err := applyPolicy(policyKey, namespace)
-		if err != nil {
-			// Surface the error back to the MCP client without terminating the server.
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-		return mcp.NewToolResultText(results), nil
-	})
 }
 
 func main() {
@@ -246,8 +52,11 @@ func main() {
 	flag.StringVar(&awsconfigPath, "awsconfig", "", "Path to the AWS config file to use. If not provided, defaults to environment variable AWS_CONFIG_FILE or ~/.aws/config.")
 	flag.StringVar(&awsProfile, "awsprofile", "", "AWS profile to use (defaults to current profile).")
 
-	// Parse CLI flags early so subsequent init can rely on them
-	flag.Parse()
+	// Parse CLI flags early so subsequent init can rely on them. Capture ErrHelp
+	if err := flag.CommandLine.Parse(os.Args[1:]); err == flag.ErrHelp {
+		// flag package has already printed the usage message via flag.Usage
+		os.Exit(0)
+	}
 
 	// If the kubeconfig flag was registered elsewhere, capture its value
 	if kubeconfigPath == "" {
@@ -292,9 +101,9 @@ func main() {
 	log.Println("MCP server instance created.")
 
 	// Register tools
-	listContexts(s)
-	switchContext(s)
-	scanCluster(s)
+	tools.ListContexts(s)
+	tools.SwitchContext(s)
+	tools.ScanCluster(s)
 
 	// Start the MCP server
 	log.Println("Starting MCP server on stdio...")
