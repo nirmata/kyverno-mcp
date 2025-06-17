@@ -10,8 +10,8 @@ A Model Context Protocol (MCP) server that provides Kyverno policy management ca
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/nirmata/go-kyverno-mcp
-   cd go-kyverno-mcp
+   git clone https://github.com/nirmata/kyverno-mcp
+   cd kyverno-mcp
    ```
 
 2. Build the binary:
@@ -41,8 +41,7 @@ A Model Context Protocol (MCP) server that provides Kyverno policy management ca
     "kyverno": {
       "command": "/path/to/kyverno-mcp",
       "args": [
-        "--kubeconfig=/path/to/your/kubeconfig",
-        "--awsconfig=/path/to/your/awsconfig",
+        "--kubeconfig=/path/to/your/kubeconfig"
       ]
     }
   }
@@ -77,7 +76,7 @@ Switch to a different Kubernetes context.
 ```json
 {
   "tool": "switch_context",
-  "context": "my-cluster-context"
+  "context": "your-cluster-name"
 }
 ```
 
