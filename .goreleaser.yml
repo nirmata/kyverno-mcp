@@ -5,7 +5,7 @@ project_name: kyverno-mcp
 
 builds:
   - id: kyverno-mcp
-    main: .
+    main: ./cmd
     binary: kyverno-mcp
     goos:   [linux, darwin, windows]
     goarch: [amd64, arm64]
@@ -23,24 +23,23 @@ archives:
 checksum:
   name_template: checksums.txt
 
-brews:
+homebrew_casks:
   - name: kyverno-mcp
     homepage: https://docs.nirmata.io/kyverno-mcp/
     description: "Latest Kyverno MCP Server"
-    url_template: "https://dl.nirmata.io/kyverno-mcp/kyverno-mcp_{{ .Version }}/{{ .ArtifactName }}"
-    skip_upload: auto
+    # tap location (same semantics as before)
     repository:
       owner: nirmata
       name: homebrew-nctl
       branch: main
       token: "{{ .Env.PAT_HOMEBREW_NCTL }}"
 
-  - name: kyverno-mcp@{{ .Major }}.{{ .Minor }}
+  - name: "kyverno-mcp@{{ .Major }}.{{ .Minor }}"
     homepage: https://docs.nirmata.io/kyverno-mcp/
     description: "GA release {{ .Major }}.{{ .Minor }} of Kyverno MCP Server"
-    url_template: "https://dl.nirmata.io/kyverno-mcp/kyverno-mcp_{{ .Version }}/{{ .ArtifactName }}"
-    skip_upload: '{{ ne .Prerelease "" }}'
-    conflicts: [kyverno-mcp]
+    skip_upload: '{{ ne .Prerelease "" }}'   # still valid
+    conflicts:
+      - formula: kyverno-mcp                  # ← map, not list
     repository:
       owner: nirmata
       name: homebrew-nctl
@@ -50,30 +49,11 @@ brews:
   - name: kyverno-mcp-rc
     homepage: https://docs.nirmata.io/kyverno-mcp/
     description: "Release-candidate builds of Kyverno MCP Server"
-    url_template: "https://dl.nirmata.io/kyverno-mcp/kyverno-mcp_{{ .Version }}/{{ .ArtifactName }}"
     skip_upload: '{{ not (hasPrefix .Prerelease "rc") }}'
-    conflicts: [kyverno-mcp, kyverno-mcp@{{ .Major }}.{{ .Minor }}]
+    conflicts:
+      - formula: kyverno-mcp
     repository:
       owner: nirmata
       name: homebrew-nctl
       branch: main
       token: "{{ .Env.PAT_HOMEBREW_NCTL }}"
-
-snapshot:
-  version_template: "{{ .Tag }}-next"
-
-changelog:
-  sort: desc
-
-release:
-  github:
-    owner: "{{ .Env.GORELEASER_GITHUB_OWNER }}"
-    name:  "{{ .Env.GORELEASER_GITHUB_REPO }}"
-
-blobs:
-- provider: s3
-  region: us-east-2
-  bucket: nirmata-downloads
-  acl: private
-  directory: kyverno-mcp/kyverno-mcp_{{ .Version }}
-  disable: '{{ and (ne .Prerelease "") (not (contains .Prerelease "rc.")) }}'
