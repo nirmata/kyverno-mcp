@@ -27,7 +27,6 @@ homebrew_casks:
   - name: kyverno-mcp
     homepage: https://docs.nirmata.io/kyverno-mcp/
     description: "Latest Kyverno MCP Server"
-    # tap location (same semantics as before)
     repository:
       owner: nirmata
       name: homebrew-nctl
@@ -37,9 +36,9 @@ homebrew_casks:
   - name: "kyverno-mcp@{{ .Major }}.{{ .Minor }}"
     homepage: https://docs.nirmata.io/kyverno-mcp/
     description: "GA release {{ .Major }}.{{ .Minor }} of Kyverno MCP Server"
-    skip_upload: '{{ ne .Prerelease "" }}'   # still valid
+    skip_upload: '{{ ne .Prerelease "" }}'   
     conflicts:
-      - formula: kyverno-mcp                  # ← map, not list
+      - formula: kyverno-mcp                  
     repository:
       owner: nirmata
       name: homebrew-nctl
