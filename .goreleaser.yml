@@ -69,3 +69,11 @@ release:
   github:
     owner: "{{ .Env.GORELEASER_GITHUB_OWNER }}"
     name:  "{{ .Env.GORELEASER_GITHUB_REPO }}"
+
+blobs:
+- provider: s3
+  region: us-east-2
+  bucket: nirmata-downloads
+  acl: private
+  directory: kyverno-mcp/kyverno-mcp_{{ .Version }}
+  disable: '{{ and (ne .Prerelease "") (not (contains .Prerelease "rc.")) }}'
