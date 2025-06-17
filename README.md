@@ -2,26 +2,16 @@
 
 A Model Context Protocol (MCP) server that provides Kyverno policy management capabilities through a standardized interface. This server allows AI assistants to interact with Kyverno policies in a Kubernetes cluster.
 
-## Features
-
-- **Scan Cluster**: Scan the cluster for resources that match specific Kyverno policies
-- **Apply Policy**: Apply Kyverno policies to specific resources in the cluster
-- **Kubernetes Context Support**: Work with different Kubernetes clusters using context switching
-- **Debug Mode**: Enable detailed logging for troubleshooting
-
 ## Prerequisites
 
-- Go 1.16 or higher
-- Kubernetes cluster with Kyverno installed
-- `kubectl` configured with access to your cluster
-- Kyverno CLI (optional, for local testing)
+- Go 1.24 or higher (for building the binary)
 
 ## Installation
 
 1. Clone the repository:
    ```bash
    git clone https://github.com/nirmata/go-kyverno-mcp
-   cd kyverno-mcp
+   cd go-kyverno-mcp
    ```
 
 2. Build the binary:
@@ -34,57 +24,16 @@ A Model Context Protocol (MCP) server that provides Kyverno policy management ca
 ### Starting the Server
 
 ```bash
-./kyverno-mcp --context=<your-k8s-context> --debug
+# Basic usage – uses the default kubeconfig at ~/.kube/config and the current context
+./kyverno-mcp
+
+# With an explicit kubeconfig file
+./kyverno-mcp --kubeconfig=/path/to/kubeconfig
+
+# The server always starts in the kubeconfig's current context; use the `switch_context` tool to change it at runtime.
 ```
 
-### Available Tools
-
-#### 1. Scan Cluster
-
-Scan the cluster for resources that match a specific Kyverno policy.
-
-**Parameters:**
-- `policy` (string, required): Name of the policy to scan with
-- `namespace` (string, required): Namespace to scan (use 'all' for all namespaces)
-- `kind` (string, required): Kind of resources to scan (e.g., Pod, Deployment)
-
-**Example Request:**
-```json
-{
-  "policy": "validate-pod-labels",
-  "namespace": "default",
-  "kind": "Pod"
-}
-```
-
-#### 2. Apply Policy
-
-Apply a Kyverno policy to a specific resource in the cluster.
-
-**Parameters:**
-- `policy` (string, required): Name of the policy to apply
-- `resource` (string, required): Name of the resource to apply the policy to
-- `namespace` (string, required): Namespace of the resource
-
-**Example Request:**
-```json
-{
-  "policy": "validate-pod-labels",
-  "resource": "my-pod",
-  "namespace": "default"
-}
-```
-
-## Configuration
-
-### Command Line Flags
-
-- `--context`: Kubernetes context to use (default: current context)
-- `--debug`: Enable debug logging (default: false)
-
-## Integration with Claude AI
-
-To use this MCP server with Claude AI, update your Claude desktop configuration:
+### Using it with an MCP Client (Claude Desktop, Amazon Q, Cursor, etc.)
 
 ```json
 {
@@ -92,35 +41,59 @@ To use this MCP server with Claude AI, update your Claude desktop configuration:
     "kyverno": {
       "command": "/path/to/kyverno-mcp",
       "args": [
-        "--context=minikube",
-        "--debug"
+        "--kubeconfig=/path/to/your/kubeconfig",
+        "--awsconfig=/path/to/your/awsconfig",
       ]
     }
   }
 }
 ```
 
-## Development
+## Command Line Flags
 
-### Building
+- `--kubeconfig` (string): Path to the kubeconfig file (defaults to the value of $KUBECONFIG, or ~/.kube/config if unset)
 
-```bash
-go build -o kyverno-mcp main.go
+## Available Tools
+
+### 1. List Kubernetes Contexts
+
+List all available Kubernetes contexts.
+
+**Example Request:**
+```json
+{
+  "tool": "list_contexts"
+}
 ```
 
-### Testing
+### 2. Switch Kubernetes Context
 
-Run unit tests:
-```bash
-go test -v ./...
+Switch to a different Kubernetes context.
+
+**Parameters:**
+- `context` (string, required): Name of the context to switch to
+
+**Example Request:**
+```json
+{
+  "tool": "switch_context",
+  "context": "my-cluster-context"
+}
 ```
 
-## Contributing
+### 3. Scan Cluster
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Scan the cluster using embedded Kyverno policy sets.
 
-## Acknowledgements
+**Parameters:**
+- `policySets` (string, optional): Policy set key: `pod-security`, `rbac-best-practices`, `kubernetes-best-practices`, or `all` (default: `all`)
+- `namespace` (string, optional): Namespace to apply policies to (default: `default`)
 
-- [Kyverno](https://kyverno.io/)
-- [Model Context Protocol](https://modelcontextprotocol.io/)
-- [Kubernetes](https://kubernetes.io/)
+**Example Request:**
+```json
+{
+  "tool": "apply_policies",
+  "policySets": "all",
+  "namespace": "default"
+}
+```

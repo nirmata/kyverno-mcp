@@ -1,2 +1,6 @@
 kyverno-mcp
 .windsurf/
+.yoyo/
+
+.cursor/
+.DS_Store
