@@ -31,7 +31,7 @@ func defaultPolicies() []byte {
 	return []byte(combinedPolicy)
 }
 
-func applyPolicy(policyKey string, namespace string) (string, error) {
+func applyPolicy(policyKey string, namespace string, gitBranch string) (string, error) {
 	// Select the appropriate embedded policy content based on the requested key
 	var policyData []byte
 	switch policyKey {
@@ -75,6 +75,7 @@ func applyPolicy(policyKey string, namespace string) (string, error) {
 		Namespace:    namespace,
 		PolicyReport: true,
 		OutputFormat: "json",
+		GitBranch:    gitBranch,
 	}
 
 	result, err := kyverno.ApplyCommandHelper(applyCommandConfig)
@@ -96,8 +97,10 @@ func ApplyPolicies(s *server.MCPServer) {
 	applyPoliciesTool := mcp.NewTool(
 		"apply_policies",
 		mcp.WithDescription("Apply Kyverno policies to Kubernetes resources in a cluster. If no namespace is provided, the policies will be applied to the default namespace."),
-		mcp.WithString("policySets", mcp.Description("Policy set key: pod-security, rbac-best-practices, kubernetes-best-practices, all (default: all).")),
+		mcp.WithString("policySets", mcp.Description("Policy set key: pod-security, rbac-best-practices, kubernetes-best-practices, all (default: all). Also accepts a git URL from remote repository \
+							     and local file paths to apply policies.")),
 		mcp.WithString("namespace", mcp.Description("Namespace to apply policies to (default: default)")),
+		mcp.WithString("gitBranch", mcp.Description("Git branch to apply policies from (default: main)")),
 	)
 
 	s.AddTool(applyPoliciesTool, func(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -116,7 +119,12 @@ func ApplyPolicies(s *server.MCPServer) {
 			namespace = args["namespace"].(string)
 		}
 
-		results, err := applyPolicy(policySets, namespace)
+		gitBranch := "main"
+		if args["gitBranch"] != nil {
+			gitBranch = args["gitBranch"].(string)
+		}
+
+		results, err := applyPolicy(policySets, namespace, gitBranch)
 		if err != nil {
 			// Surface the error back to the MCP client without terminating the server.
 			return mcp.NewToolResultError(err.Error()), nil
