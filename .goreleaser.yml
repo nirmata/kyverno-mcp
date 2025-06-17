@@ -1,0 +1,71 @@
+# .goreleaser.yaml – kyverno-mcp (v2 syntax)
+version: 2
+
+project_name: kyverno-mcp
+
+builds:
+  - id: kyverno-mcp
+    main: .
+    binary: kyverno-mcp
+    goos:   [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    env:    [CGO_ENABLED=0]
+    ldflags: ["-s -w"]
+
+archives:
+  - ids: [kyverno-mcp]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+
+checksum:
+  name_template: checksums.txt
+
+brews:
+  - name: kyverno-mcp
+    homepage: https://docs.nirmata.io/kyverno-mcp/
+    description: "Latest Kyverno MCP Server"
+    url_template: "https://dl.nirmata.io/kyverno-mcp/kyverno-mcp_{{ .Version }}/{{ .ArtifactName }}"
+    skip_upload: auto
+    repository:
+      owner: nirmata
+      name: homebrew-nctl
+      branch: main
+      token: "{{ .Env.PAT_HOMEBREW_NCTL }}"
+
+  - name: kyverno-mcp@{{ .Major }}.{{ .Minor }}
+    homepage: https://docs.nirmata.io/kyverno-mcp/
+    description: "GA release {{ .Major }}.{{ .Minor }} of Kyverno MCP Server"
+    url_template: "https://dl.nirmata.io/kyverno-mcp/kyverno-mcp_{{ .Version }}/{{ .ArtifactName }}"
+    skip_upload: '{{ ne .Prerelease "" }}'
+    conflicts: [kyverno-mcp]
+    repository:
+      owner: nirmata
+      name: homebrew-nctl
+      branch: main
+      token: "{{ .Env.PAT_HOMEBREW_NCTL }}"
+
+  - name: kyverno-mcp-rc
+    homepage: https://docs.nirmata.io/kyverno-mcp/
+    description: "Release-candidate builds of Kyverno MCP Server"
+    url_template: "https://dl.nirmata.io/kyverno-mcp/kyverno-mcp_{{ .Version }}/{{ .ArtifactName }}"
+    skip_upload: '{{ not (hasPrefix .Prerelease "rc") }}'
+    conflicts: [kyverno-mcp, kyverno-mcp@{{ .Major }}.{{ .Minor }}]
+    repository:
+      owner: nirmata
+      name: homebrew-nctl
+      branch: main
+      token: "{{ .Env.PAT_HOMEBREW_NCTL }}"
+
+snapshot:
+  version_template: "{{ .Tag }}-next"
+
+changelog:
+  sort: desc
+
+release:
+  github:
+    owner: "{{ .Env.GORELEASER_GITHUB_OWNER }}"
+    name:  "{{ .Env.GORELEASER_GITHUB_REPO }}"
