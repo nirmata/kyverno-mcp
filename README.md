@@ -82,10 +82,10 @@ Switch to a different Kubernetes context.
 
 ### 3. Scan Cluster
 
-Scan the cluster using embedded Kyverno policy sets or a remote Git repository.
+Scan cluster resources using curated Kyverno policy sets, or policies from Git repositories, or files.
 
 **Parameters:**
-- `policySets` (string, optional): Policy set key (`pod-security`, `rbac-best-practices`, `kubernetes-best-practices`, `all`) or a Git repository URL containing policies (default: `all`)
+- `policySets` (string, optional): Policy set name (`pod-security`, `rbac-best-practices`, `kubernetes-best-practices`, `all`), or Git repository URLs, or file paths
 - `namespace` (string, optional): Namespace to apply policies to (default: `default`)
 - `gitBranch` (string, optional): Branch to use when `policySets` is a Git repo URL (default: `main`)
 
