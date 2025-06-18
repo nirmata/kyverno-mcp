@@ -4,3 +4,5 @@ kyverno-mcp
 
 .cursor/
 .DS_Store
+
+.secrets
