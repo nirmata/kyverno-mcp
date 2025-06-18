@@ -1,16 +1,31 @@
 # .goreleaser.yaml – kyverno-mcp (v2 syntax)
 version: 2
-
 project_name: kyverno-mcp
 
+before:
+  hooks:
+  - go mod tidy
+
 builds:
-  - id: kyverno-mcp
-    main: ./cmd
-    binary: kyverno-mcp
-    goos:   [linux, darwin, windows]
-    goarch: [amd64, arm64]
-    env:    [CGO_ENABLED=0]
-    ldflags: ["-s -w"]
+- id: kyverno-mcp
+  main: ./cmd
+  binary: kyverno-mcp
+  goos:   [linux, darwin, windows]
+  goarch: [amd64, arm64]
+  env:    [CGO_ENABLED=0]
+  ldflags: ["-s -w"]
+
+blobs:
+- provider: s3
+  region: us-east-2
+  bucket: nirmata-downloads
+  acl: private
+  directory: kyverno-mcp/kyverno-mcp_{{ .Version }}
+  disable: '{{ and (ne .Prerelease "") (not (contains .Prerelease "rc.")) }}'
+
+signs:
+- artifacts: all
+  signature: ${artifact}.asc
 
 archives:
   - ids: [kyverno-mcp]
@@ -29,9 +44,15 @@ homebrew_casks:
     description: "Latest Kyverno MCP Server"
     repository:
       owner: nirmata
-      name: homebrew-nctl
+      name: homebrew-tap
       branch: main
       token: "{{ .Env.PAT_HOMEBREW_NCTL }}"
+      pull_request:
+        enabled: false
+        base:
+          owner: nirmata
+          name: kyverno-mcp
+          branch: main
 
   - name: "kyverno-mcp@{{ .Major }}.{{ .Minor }}"
     homepage: https://docs.nirmata.io/kyverno-mcp/
@@ -41,18 +62,45 @@ homebrew_casks:
       - formula: kyverno-mcp                  
     repository:
       owner: nirmata
-      name: homebrew-nctl
+      name: homebrew-tap
       branch: main
       token: "{{ .Env.PAT_HOMEBREW_NCTL }}"
+      pull_request:
+        enabled: false
+        base:
+          owner: nirmata
+          name: kyverno-mcp
+          branch: main
 
   - name: kyverno-mcp-rc
     homepage: https://docs.nirmata.io/kyverno-mcp/
     description: "Release-candidate builds of Kyverno MCP Server"
-    skip_upload: '{{ not (hasPrefix .Prerelease "rc") }}'
+    skip_upload: '{{ not (contains .Prerelease "rc") }}'
     conflicts:
       - formula: kyverno-mcp
     repository:
       owner: nirmata
-      name: homebrew-nctl
+      name: homebrew-tap
       branch: main
       token: "{{ .Env.PAT_HOMEBREW_NCTL }}"
+      pull_request:
+        enabled: false
+        base:
+          owner: nirmata
+          name: kyverno-mcp
+          branch: main
+
+release:
+  prerelease: auto
+
+source:
+  enabled: false
+
+snapshot:
+  version_template: '{{ incpatch .Version }}-next'
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+    - '^config:'
