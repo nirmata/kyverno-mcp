@@ -71,6 +71,18 @@ jobs:
           fi
 
       - name: Run GoReleaser
+        if: ${{ env.ACT }} == 'true'
+        uses: goreleaser/goreleaser-action@9ed2f89a662bf1735a48bc8557fd212fa902bebf # v6.1.0
+        with:
+          distribution: goreleaser
+          version: latest
+          args: release --clean --snapshot --skip-publish --skip-validate
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PAT_HOMEBREW_NCTL: ${{ secrets.PAT_HOMEBREW_NCTL }}
+          SHOULD_UPDATE_BREW: ${{ env.SHOULD_UPDATE_BREW }}
+      - name: Run GoReleaser
+        if: ${{ env.ACT }} != 'true'
         uses: goreleaser/goreleaser-action@9ed2f89a662bf1735a48bc8557fd212fa902bebf # v6.1.0
         with:
           distribution: goreleaser
@@ -80,3 +92,4 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PAT_HOMEBREW_NCTL: ${{ secrets.PAT_HOMEBREW_NCTL }}
           SHOULD_UPDATE_BREW: ${{ env.SHOULD_UPDATE_BREW }}
+
