@@ -4,6 +4,9 @@ on:
   push:
     tags:
       - 'v*'
+    branches:  # run on every commit so it appears
+      - '**'
+  workflow_dispatch: {}   # optional manual button
 
 permissions:
   contents: write
