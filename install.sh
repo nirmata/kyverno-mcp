@@ -9,7 +9,7 @@ for cmd in curl tar; do
   fi
 done
 
-REPO="nirmata/go-kyverno-mcp"
+REPO="nirmata/kyverno-mcp"
 BINARY="kyverno-mcp"
 
 # Detect OS
