@@ -8,6 +8,18 @@ A Model Context Protocol (MCP) server that provides Kyverno policy management ca
 
 ## Installation
 
+### Option A: Quick install script (macOS/Linux)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/nirmata/kyverno-mcp/main/install.sh | bash
+```
+
+The script automatically detects your OS and CPU architecture, downloads the latest release tarball from GitHub, and installs the `kyverno-mcp` binary to `/usr/local/bin` (you may be prompted for sudo).
+
+If you have a personal access token in the `GITHUB_TOKEN` environment variable the script will use it to avoid GitHub API rate-limits.
+
+### Option B: Build from source
+
 1. Clone the repository:
    ```bash
    git clone https://github.com/nirmata/kyverno-mcp
