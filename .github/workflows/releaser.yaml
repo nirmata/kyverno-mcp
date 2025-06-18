@@ -52,8 +52,8 @@ jobs:
 
       - name: Check Homebrew formula version
         run: |
-          if curl -s "https://raw.githubusercontent.com/nirmata/homebrew-tap/refs/heads/main/kyverno-mcp.rb" > current.rb; then
-            current_version="$(grep -Eo 'version "([^"]+)"' current.rb | cut -d'"' -f 2)"
+          if curl -s "https://raw.githubusercontent.com/nirmata/homebrew-tap/refs/heads/main/kyverno-mcp.rb" > /tmp/current.rb; then
+            current_version="$(grep -Eo 'version "([^"]+)"' /tmp/current.rb | cut -d'"' -f 2)"
             new_version="${GITHUB_REF#refs/tags/v}"
             echo "Current Homebrew version: $current_version"
             echo "New release version: $new_version"
