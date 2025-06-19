@@ -33,7 +33,7 @@ signs:
   signature: ${artifact}.asc
 
 archives:
-- format: zip
+- formats: [ 'zip']
   name_template: |-
     {{- .ProjectName -}}
     _{{- .Version -}}
@@ -44,7 +44,7 @@ archives:
     {{- if not (eq .Amd64 "v1") -}}{{- .Amd64 -}}{{- end -}}
   files: []
 
-brews:
+homebrew_casks:
 - name: kyverno-mcp
   homepage: https://docs.nirmata.io/kyverno-mcp/
   description: Latest Kyverno MCP Server
