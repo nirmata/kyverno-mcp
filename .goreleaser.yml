@@ -44,7 +44,7 @@ archives:
     {{- if not (eq .Amd64 "v1") -}}{{- .Amd64 -}}{{- end -}}
   files: []
 
-homebrew_casks:
+brews:
 - name: kyverno-mcp
   homepage: https://docs.nirmata.io/kyverno-mcp/
   description: Latest Kyverno MCP Server
