@@ -1,12 +1,7 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - 'v*'
-    branches:  # run on every commit so it appears
-      - '**'
-  workflow_dispatch: {}   # optional manual button
+  workflow_dispatch: {}   # Enables manual triggering from the Actions tab
 
 permissions:
   id-token: write
