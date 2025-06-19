@@ -31,7 +31,7 @@ func defaultPolicies() []byte {
 	return []byte(combinedPolicy)
 }
 
-func applyPolicy(policyKey string, namespace string) (string, error) {
+func applyPolicy(policyKey string, namespace string, gitBranch string) (string, error) {
 	// Select the appropriate embedded policy content based on the requested key
 	var policyData []byte
 	switch policyKey {
@@ -75,6 +75,7 @@ func applyPolicy(policyKey string, namespace string) (string, error) {
 		Namespace:    namespace,
 		PolicyReport: true,
 		OutputFormat: "json",
+		GitBranch:    gitBranch,
 	}
 
 	result, err := kyverno.ApplyCommandHelper(applyCommandConfig)
@@ -116,7 +117,12 @@ func ApplyPolicies(s *server.MCPServer) {
 			namespace = args["namespace"].(string)
 		}
 
-		results, err := applyPolicy(policySets, namespace)
+		gitBranch := "main"
+		if args["gitBranch"] != nil {
+			gitBranch = args["gitBranch"].(string)
+		}
+
+		results, err := applyPolicy(policySets, namespace, gitBranch)
 		if err != nil {
 			// Surface the error back to the MCP client without terminating the server.
 			return mcp.NewToolResultError(err.Error()), nil
