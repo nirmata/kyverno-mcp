@@ -95,9 +95,9 @@ func ApplyPolicies(s *server.MCPServer) {
 	log.Println("Registering tool: apply_policies")
 	applyPoliciesTool := mcp.NewTool(
 		"apply_policies",
-		mcp.WithDescription("Apply Kyverno policies to Kubernetes resources in a cluster. If no namespace is provided, the policies will be applied to the default namespace."),
-		mcp.WithString("policySets", mcp.Description("Policy set key: pod-security, rbac-best-practices, kubernetes-best-practices, all (default: all).")),
-		mcp.WithString("namespace", mcp.Description("Namespace to apply policies to (default: default)")),
+		mcp.WithDescription(`Apply Kyverno policies to Kubernetes resources in a cluster. If no namespace is provided, the policies will be applied to the default namespace.`),
+		mcp.WithString("policySets", mcp.Description(`Policy set key: pod-security, rbac-best-practices, kubernetes-best-practices, all (default: all).`)),
+		mcp.WithString("namespace", mcp.Description(`Namespace to apply policies to (default: default)`)),
 	)
 
 	s.AddTool(applyPoliciesTool, func(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
