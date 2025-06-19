@@ -54,7 +54,7 @@ brews:
     owner: nirmata
     name: homebrew-tap
     branch: main
-    token: "{{ .Env.PAT_HOMEBREW_NCTL }}"
+    token: "{{ secrets.GITHUB_TOKEN }}"
     pull_request:
       enabled: false
       base:
@@ -73,7 +73,7 @@ brews:
     owner: nirmata
     name: homebrew-tap
     branch: main
-    token: "{{ .Env.PAT_HOMEBREW_NCTL }}"
+    token: "{{ secrets.GITHUB_TOKEN }}"
     pull_request:
       enabled: false
       base:
@@ -92,7 +92,7 @@ brews:
     owner: nirmata
     name: homebrew-tap
     branch: main
-    token: "{{ .Env.PAT_HOMEBREW_NCTL }}"
+    token: "{{ secrets.GITHUB_TOKEN }}"
     pull_request:
       enabled: false
       base:
