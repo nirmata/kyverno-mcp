@@ -1,7 +1,9 @@
 name: Release
 
 on:
-  workflow_dispatch: {}   # Enables manual triggering from the Actions tab
+  push:
+    tags: ['v*']
+  workflow_dispatch: {}
 
 permissions:
   id-token: write
