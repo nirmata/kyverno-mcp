@@ -17,6 +17,12 @@ jobs:
         with:
           fetch-depth: 0
       
+      - name: Inspect OIDC token
+        run: |
+          raw=$(curl -s "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com" \
+                    -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN")
+            echo "$raw" | jq -R 'split(".") | .[1] | @base64d | fromjson'
+      
       - name: Configure AWS credentials for S3 upload
         uses: aws-actions/configure-aws-credentials@v4
         with:
