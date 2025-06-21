@@ -48,7 +48,7 @@ brews:
 - name: kyverno-mcp
   homepage: https://docs.nirmata.io/kyverno-mcp/
   description: Latest Kyverno MCP Server
-  url_template: "https://dl.nirmata.io/kyverno-mcp/kyverno-mcp_{{ .Version }}/{{ .ArtifactName }}"
+  url_template: "https://nirmata-downloads.s3.us-east-2.amazonaws.com/kyverno-mcp/kyverno-mcp_{{ .Version }}/{{ .ArtifactName }}"
   skip_upload: '{{ or (ne .Prerelease "") (ne (.Env.SHOULD_UPDATE_BREW) "true") }}'
   repository:
     owner: nirmata
