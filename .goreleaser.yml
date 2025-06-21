@@ -85,7 +85,7 @@ brews:
   homepage: https://docs.nirmata.io/kyverno-mcp/
   description: Release-candidate builds of Kyverno MCP Server
   url_template: "https://dl.nirmata.io/kyverno-mcp/kyverno-mcp_{{ .Version }}/{{ .ArtifactName }}"
-  skip_upload: '{{ not (contains .Prerelease "rc.") }}'
+  skip_upload: '{{ not (hasPrefix .Prerelease "rc") }}'
   conflicts:
     - kyverno-mcp
   repository:
