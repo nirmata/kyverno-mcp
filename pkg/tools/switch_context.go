@@ -4,7 +4,8 @@ package tools
 import (
 	"context"
 	"fmt"
-	"log"
+
+	"k8s.io/klog/v2"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -13,7 +14,7 @@ import (
 
 func SwitchContext(s *server.MCPServer) {
 	// Switch context tool
-	log.Println("Registering tool: switch_context")
+	klog.InfoS("Registering tool: switch_context")
 	s.AddTool(mcp.NewTool("switch_context",
 		mcp.WithDescription("Switch to a different Kubernetes context. If no context is provided, the default context will be used."),
 		mcp.WithString("context",
@@ -24,7 +25,7 @@ func SwitchContext(s *server.MCPServer) {
 		// Get the context parameter
 		contextName, err := request.RequireString("context")
 		if err != nil {
-			log.Printf("Error in 'switch_context': Invalid context parameter: %v", err)
+			klog.ErrorS(err, "Error in 'switch_context': Invalid context parameter")
 			return mcp.NewToolResultError(fmt.Sprintf("Invalid context parameter: %v", err)), nil
 		}
 
@@ -32,7 +33,7 @@ func SwitchContext(s *server.MCPServer) {
 
 		cfg, err := pathOpts.GetStartingConfig()
 		if err != nil {
-			log.Printf("Error in 'switch_context': Error loading kubeconfig: %v", err)
+			klog.ErrorS(err, "Error in 'switch_context': Error loading kubeconfig")
 			return mcp.NewToolResultError(fmt.Sprintf("Error loading kubeconfig: %v", err)), nil
 		}
 
@@ -41,14 +42,14 @@ func SwitchContext(s *server.MCPServer) {
 			for name := range cfg.Contexts {
 				availableContexts = append(availableContexts, name)
 			}
-			log.Printf("Error in 'switch_context': Context '%s' not found. Available: %v", contextName, availableContexts)
+			klog.ErrorS(err, "Error in 'switch_context': Context '%s' not found. Available: %v", contextName, availableContexts)
 			return mcp.NewToolResultError(fmt.Sprintf("Context '%s' not found. Available contexts: %v", contextName, availableContexts)), nil
 		}
 
 		cfg.CurrentContext = contextName
 
 		if err := clientcmd.ModifyConfig(pathOpts, *cfg, false); err != nil {
-			log.Printf("Error in 'switch_context': Error writing kubeconfig: %v", err)
+			klog.ErrorS(err, "Error in 'switch_context': Error writing kubeconfig")
 			return mcp.NewToolResultError(fmt.Sprintf("Error writing kubeconfig: %v", err)), nil
 		}
 

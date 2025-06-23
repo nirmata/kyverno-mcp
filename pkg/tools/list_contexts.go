@@ -5,7 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+
+	"k8s.io/klog/v2"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -24,11 +25,11 @@ func ListContexts(s *server.MCPServer) {
 	}
 
 	// Add a tool to list available contexts
-	log.Println("Registering tool: list_contexts")
+	klog.InfoS("Registering tool: list_contexts")
 	s.AddTool(mcp.NewTool("list_contexts",
 		mcp.WithDescription("List all available Kubernetes contexts"),
 	), func(_ context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		log.Println("Tool 'list_contexts' invoked.")
+		klog.InfoS("Tool 'list_contexts' invoked.")
 		// Load the Kubernetes configuration from the specified kubeconfig or default location
 		loadingRules := newLoadingRules()
 		configOverrides := &clientcmd.ConfigOverrides{}
@@ -36,7 +37,7 @@ func ListContexts(s *server.MCPServer) {
 		config := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, configOverrides)
 		rawConfig, err := config.RawConfig()
 		if err != nil {
-			log.Printf("Error in 'list_contexts': failed to load kubeconfig: %v", err)
+			klog.ErrorS(err, "Error in 'list_contexts': failed to load kubeconfig")
 			return mcp.NewToolResultError(fmt.Sprintf("Error loading kubeconfig: %v", err)), nil
 		}
 
@@ -53,7 +54,7 @@ func ListContexts(s *server.MCPServer) {
 
 		resultJSON, err := json.MarshalIndent(result, "", "  ")
 		if err != nil {
-			log.Printf("Error in 'list_contexts': failed to format result: %v", err)
+			klog.ErrorS(err, "Error in 'list_contexts': failed to format result")
 			return mcp.NewToolResultError(fmt.Sprintf("Error formatting result: %v", err)), nil
 		}
 
