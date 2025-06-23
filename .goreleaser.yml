@@ -1,58 +1,119 @@
-# .goreleaser.yaml – kyverno-mcp (v2 syntax)
+project_name: kyverno-mcp
 version: 2
 
-project_name: kyverno-mcp
+before:
+  hooks:
+  - go mod tidy
 
 builds:
-  - id: kyverno-mcp
-    main: ./cmd
-    binary: kyverno-mcp
-    goos:   [linux, darwin, windows]
-    goarch: [amd64, arm64]
-    env:    [CGO_ENABLED=0]
-    ldflags: ["-s -w"]
+- id: kyverno-mcp
+  main: ./cmd/main.go
+  env:
+  - CGO_ENABLED=0
+  goos:
+  - linux
+  - darwin
+  - windows
+  binary: kyverno-mcp
+  flags:
+  - -trimpath
+  ldflags:
+  - -s -w -X github.com/nirmata/kyverno-mcp/pkg/version.BuildVersion={{ .Version }}
+
+blobs:
+- provider: s3
+  region: us-east-2
+  bucket: nirmata-downloads
+  acl: private
+  directory: kyverno-mcp/kyverno-mcp_{{ .Version }}
+  disable: '{{ and (ne .Prerelease "") (not (contains .Prerelease "rc.")) }}'
+
+signs:
+- artifacts: all
+  signature: ${artifact}.asc
 
 archives:
-  - ids: [kyverno-mcp]
-    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
-    formats: [tar.gz]
-    format_overrides:
-      - goos: windows
-        formats: [zip]
+- formats: [ 'zip']
+  name_template: |-
+    {{- .ProjectName -}}
+    _{{- .Version -}}
+    _{{- if eq .Os "darwin" -}}macos{{- else -}}{{ .Os }}{{- end -}}
+    _{{- .Arch -}}
+    {{- with .Arm -}}v{{- . -}}{{- end -}}
+    {{- with .Mips -}}_{{- . -}}{{- end -}}
+    {{- if not (eq .Amd64 "v1") -}}{{- .Amd64 -}}{{- end -}}
+  files: []
+
+brews:
+- name: kyverno-mcp
+  homepage: https://docs.nirmata.io/kyverno-mcp/
+  description: Latest Kyverno MCP Server
+  url_template: "https://nirmata-downloads.s3.us-east-2.amazonaws.com/kyverno-mcp/kyverno-mcp_{{ .Version }}/{{ .ArtifactName }}"
+  skip_upload: '{{ or (ne .Prerelease "") (ne (.Env.SHOULD_UPDATE_BREW) "true") }}'
+  repository:
+    owner: nirmata
+    name: homebrew-tap
+    branch: main
+    token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    pull_request:
+      enabled: false
+      base:
+        owner: nirmata
+        name: kyverno-mcp
+        branch: main
+
+- name: "kyverno-mcp@{{ .Major }}.{{ .Minor }}"
+  homepage: https://docs.nirmata.io/kyverno-mcp/
+  description: GA release {{ .Major }}.{{ .Minor }} of Kyverno MCP Server
+  url_template: "https://dl.nirmata.io/kyverno-mcp/kyverno-mcp_{{ .Version }}/{{ .ArtifactName }}"
+  skip_upload: '{{ ne .Prerelease "" }}'
+  conflicts:
+    - kyverno-mcp
+  repository:
+    owner: nirmata
+    name: homebrew-tap
+    branch: main
+    token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    pull_request:
+      enabled: false
+      base:
+        owner: nirmata
+        name: kyverno-mcp
+        branch: main
+
+- name: kyverno-mcp-rc
+  homepage: https://docs.nirmata.io/kyverno-mcp/
+  description: Release-candidate builds of Kyverno MCP Server
+  url_template: "https://dl.nirmata.io/kyverno-mcp/kyverno-mcp_{{ .Version }}/{{ .ArtifactName }}"
+  skip_upload: '{{ not (contains .Prerelease "rc.") }}'
+  conflicts:
+    - kyverno-mcp
+  repository:
+    owner: nirmata
+    name: homebrew-tap
+    branch: main
+    token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    pull_request:
+      enabled: false
+      base:
+        owner: nirmata
+        name: kyverno-mcp
+        branch: main
+
+release:
+  prerelease: auto
+
+source:
+  enabled: false
 
 checksum:
-  name_template: checksums.txt
+  name_template: 'checksums.txt'
 
-homebrew_casks:
-  - name: kyverno-mcp
-    homepage: https://docs.nirmata.io/kyverno-mcp/
-    description: "Latest Kyverno MCP Server"
-    repository:
-      owner: nirmata
-      name: homebrew-nctl
-      branch: main
-      token: "{{ .Env.PAT_HOMEBREW_NCTL }}"
+snapshot:
+  version_template: '{{ incpatch .Version }}-next'
 
-  - name: "kyverno-mcp@{{ .Major }}.{{ .Minor }}"
-    homepage: https://docs.nirmata.io/kyverno-mcp/
-    description: "GA release {{ .Major }}.{{ .Minor }} of Kyverno MCP Server"
-    skip_upload: '{{ ne .Prerelease "" }}'   
-    conflicts:
-      - formula: kyverno-mcp                  
-    repository:
-      owner: nirmata
-      name: homebrew-nctl
-      branch: main
-      token: "{{ .Env.PAT_HOMEBREW_NCTL }}"
-
-  - name: kyverno-mcp-rc
-    homepage: https://docs.nirmata.io/kyverno-mcp/
-    description: "Release-candidate builds of Kyverno MCP Server"
-    skip_upload: '{{ not (hasPrefix .Prerelease "rc") }}'
-    conflicts:
-      - formula: kyverno-mcp
-    repository:
-      owner: nirmata
-      name: homebrew-nctl
-      branch: main
-      token: "{{ .Env.PAT_HOMEBREW_NCTL }}"
+changelog:
+  sort: asc
+  filters:
+    exclude:
+    - '^config:'
