@@ -31,6 +31,7 @@ func init() {
 		fmt.Fprintln(flag.CommandLine.Output(), "  list_contexts   – List all available Kubernetes contexts")
 		fmt.Fprintln(flag.CommandLine.Output(), "  switch_context  – Switch to a different Kubernetes context (requires --context)")
 		fmt.Fprintln(flag.CommandLine.Output(), "  apply_policies  – Apply policies to a cluster")
+		fmt.Fprintln(flag.CommandLine.Output(), "  show_violations – Show violations for a given resource")
 
 		// Terminate after printing help to match standard behaviour.
 	}
@@ -84,6 +85,7 @@ func main() {
 	tools.ListContexts(s)
 	tools.SwitchContext(s)
 	tools.ApplyPolicies(s)
+	tools.ShowViolations(s)
 
 	// Start the MCP server
 	log.Println("Starting MCP server on stdio...")
