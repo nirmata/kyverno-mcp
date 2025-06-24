@@ -6,13 +6,13 @@ import (
 	"encoding/json"
 	"fmt"
 	kyverno "kyverno-mcp/pkg/kyverno-cli"
-	"log"
 	"os"
 	"strings"
 
 	"github.com/kyverno/kyverno/cmd/cli/kubectl-kyverno/commands/apply"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	"k8s.io/klog/v2"
 
 	_ "embed"
 )
@@ -93,7 +93,7 @@ func applyPolicy(policyKey string, namespace string, gitBranch string) (string, 
 }
 
 func ApplyPolicies(s *server.MCPServer) {
-	log.Println("Registering tool: apply_policies")
+	klog.InfoS("Registering tool: apply_policies")
 	applyPoliciesTool := mcp.NewTool(
 		"apply_policies",
 		mcp.WithDescription(`Apply Kyverno policies to Kubernetes resources in a cluster. If no namespace is provided, the policies will be applied to the default namespace.`),
