@@ -82,8 +82,7 @@ jobs:
       - name: Authenticate to GHCR
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | 
-          ko login ghcr.io --username ${{ github.actor }} 
-          --password-stdin
+          ko login ghcr.io --username ${{ github.actor }} --password-stdin
 
       - name: Build + push multi-arch image with ko
         run: |
