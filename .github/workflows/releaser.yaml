@@ -23,7 +23,7 @@ jobs:
       
       - name: Extract tag
         id: tag
-        run: echo "ver=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+        run: echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
       
       - name: Inspect OIDC token
         run: |
