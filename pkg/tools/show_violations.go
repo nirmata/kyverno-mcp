@@ -3,6 +3,7 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -19,6 +20,9 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
 )
+
+// errNoPolicyReportCRD is returned when the PolicyReport and ClusterPolicyReport CRDs are not present in the cluster.
+var errNoPolicyReportCRD = errors.New("no PolicyReport CRD found")
 
 // ShowViolations registers the show_violations tool with the MCP server.
 func ShowViolations(s *server.MCPServer) {
@@ -37,7 +41,7 @@ func ShowViolations(s *server.MCPServer) {
 			yamls, err := gatherReportYAML(ctx, ns)
 			if err != nil {
 				// If Kyverno (PolicyReport CRDs) is not installed, provide Helm installation instructions instead
-				if strings.Contains(err.Error(), "no PolicyReport CRD found") {
+				if errors.Is(err, errNoPolicyReportCRD) {
 					return mcp.NewToolResultText(kyvernoHelmInstructions()), nil
 				}
 				return mcp.NewToolResultError(err.Error()), nil
@@ -159,12 +163,12 @@ func policyReportGVRs(disc discovery.DiscoveryInterface) (schema.GroupVersionRes
 			}
 		}
 	}
-	return schema.GroupVersionResource{}, schema.GroupVersionResource{}, fmt.Errorf("no PolicyReport CRD found")
+	return schema.GroupVersionResource{}, schema.GroupVersionResource{}, errNoPolicyReportCRD
 }
 
 // kyvernoHelmInstructions returns user-friendly instructions to install Kyverno via Helm.
 func kyvernoHelmInstructions() string {
-	return `Kyverno does not appear to be installed in this cluster.
+	return `Kyverno is not installed in the cluster.  
 
 Install Kyverno using Helm:
 
@@ -177,7 +181,7 @@ Install Kyverno using Helm:
 3. Install Kyverno in the kyverno namespace (creates it if it doesn't exist):
    helm install kyverno kyverno/kyverno --namespace kyverno --create-namespace
 
-4. (Optional) Install the Kyverno policies:
+4. (Optional) Install the Kyverno policies for pod security standards:
    helm install kyverno-policies kyverno/kyverno-policies --namespace kyverno
 
 After installation, wait until all Kyverno pods are running before re-running this tool.`
