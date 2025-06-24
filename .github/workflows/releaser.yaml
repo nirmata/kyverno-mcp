@@ -90,6 +90,7 @@ jobs:
             --platform="${KO_PLATFORMS}" \
             --tags "latest,${VERSION}" \
             --sbom=cyclonedx \
+            --bare \
             --push
 
       - name: Install Cosign
