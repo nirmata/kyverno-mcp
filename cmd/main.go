@@ -6,9 +6,10 @@ import (
 	"flag"
 	"fmt"
 	"kyverno-mcp/pkg/tools"
-	"log"
 	"os"
 	"time"
+
+	"k8s.io/klog/v2"
 
 	"github.com/mark3labs/mcp-go/server"
 )
@@ -37,6 +38,8 @@ func init() {
 }
 
 func main() {
+	klog.InitFlags(nil)
+	flag.Set("v", "2")
 	// Define CLI flags (guard against duplicate registration from imported packages)
 	if flag.Lookup("kubeconfig") == nil {
 		flag.StringVar(&kubeconfigPath, "kubeconfig", "", "Path to the kubeconfig file to use. If not provided, defaults are used.")
@@ -46,6 +49,7 @@ func main() {
 	if err := flag.CommandLine.Parse(os.Args[1:]); err == flag.ErrHelp {
 		// flag package has already printed the usage message via flag.Usage
 		os.Exit(0)
+		defer klog.Flush()
 	}
 
 	// If the kubeconfig flag was registered elsewhere, capture its value
@@ -58,27 +62,27 @@ func main() {
 	if kubeconfigPath != "" {
 		// Ensure downstream libraries relying on KUBECONFIG honour the supplied path (e.g., Kyverno CLI helpers)
 		_ = os.Setenv("KUBECONFIG", kubeconfigPath)
-		log.Printf("Using kubeconfig file: %s", kubeconfigPath)
+		klog.InfoS("Using kubeconfig file: %s", kubeconfigPath)
 	}
 
 	// Setup logging to standard output
-	log.SetOutput(os.Stderr)
-	log.Println("Logging initialized to Stdout.")
-	log.Println("------------------------------------------------------------------------")
-	log.Printf("Kyverno MCP Server starting at %s", time.Now().Format(time.RFC3339))
+	klog.SetOutput(os.Stderr)
+	klog.Info("Logging initialized to Stdout.")
+	klog.Info("------------------------------------------------------------------------")
+	klog.InfoS("Kyverno MCP Server starting at %s", time.Now().Format(time.RFC3339))
 
-	log.SetPrefix("kyverno-mcp: ")
-	log.Println("Starting Kyverno MCP server...")
+	klog.Info("kyverno-mcp: ")
+	klog.Info("Starting Kyverno MCP server...")
 
 	// Create a new MCP server
-	log.Println("Creating new MCP server instance...")
+	klog.InfoS("Creating new MCP server instance...")
 	s := server.NewMCPServer(
 		"Kyverno MCP Server",
 		"1.0.0",
 		server.WithToolCapabilities(false),
 		server.WithRecovery(),
 	)
-	log.Println("MCP server instance created.")
+	klog.Info("MCP server instance created.")
 
 	// Register tools
 	tools.ListContexts(s)
@@ -86,9 +90,9 @@ func main() {
 	tools.ApplyPolicies(s)
 
 	// Start the MCP server
-	log.Println("Starting MCP server on stdio...")
+	klog.Info("Starting MCP server on stdio...")
 	var err error
 	if err = server.ServeStdio(s); err != nil {
-		log.Fatalf("Error starting server: %v\n", err)
+		klog.ErrorS(err, "error starting server")
 	}
 }

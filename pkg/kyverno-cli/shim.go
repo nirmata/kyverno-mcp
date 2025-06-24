@@ -11,11 +11,11 @@ import (
 	// blank import
 	_ "unsafe"
 
-	"github.com/golang/glog"
 	"github.com/kyverno/kyverno/cmd/cli/kubectl-kyverno/commands/apply"
 	"github.com/kyverno/kyverno/cmd/cli/kubectl-kyverno/processor"
 	engineapi "github.com/kyverno/kyverno/pkg/engine/api"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/klog/v2"
 )
 
 // Compile the regular expression
@@ -64,7 +64,7 @@ func extractPolicyResourceMappingCount(content []byte) string {
 	policyResourceMappingCount := re.FindString(string(content))
 	// Check if the substring was found
 	if policyResourceMappingCount == "" {
-		glog.V(2).Info("result mapping not found")
+		klog.V(2).Info("result mapping not found")
 	}
 	return policyResourceMappingCount
 }
