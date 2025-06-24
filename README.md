@@ -113,7 +113,7 @@ Scan cluster resources using curated Kyverno policy sets, or policies from Git r
 
 ### 4. Show Kyverno Violations
 
-Display all non-passing results from Kyverno `PolicyReport` (namespaced) and `ClusterPolicyReport` (cluster-wide) resources.
+Display all policy violations and errors from Kyverno `PolicyReport` (namespaced) and `ClusterPolicyReport` (cluster-wide) resources.
 
 If Kyverno is not installed in the active cluster, this tool instead returns a short set of Helm commands that you can run to install the Kyverno controller and its default policy packs.
 
