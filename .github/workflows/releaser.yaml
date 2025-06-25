@@ -2,7 +2,10 @@ name: Release
 
 on:
   push:
-    tags: ['v*']
+    branches:
+      - main
+    tags:
+      - 'v*'
   workflow_dispatch: {}
 
 permissions:
@@ -13,17 +16,11 @@ permissions:
 jobs:
   goreleaser:
     runs-on: blacksmith-2vcpu-ubuntu-2204
-    outputs:
-      version: ${{ steps.tag.outputs.version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      
-      - name: Extract tag
-        id: tag
-        run: echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
       
       - name: Inspect OIDC token
         run: |
@@ -59,44 +56,3 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SHOULD_UPDATE_BREW: "true"
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-  image:
-    needs: goreleaser
-    runs-on: blacksmith-2vcpu-ubuntu-2204
-    permissions:
-      id-token: write
-      contents: read
-      packages: write
-    env:
-      VERSION: ${{ needs.goreleaser.outputs.version }}
-      KO_PLATFORMS:   linux/amd64,linux/arm64
-      KO_DOCKER_REPO: ghcr.io/nirmata/kyverno-mcp
-    steps:
-      - name: Checkout source
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Install ko CLI
-        uses: ko-build/setup-ko@v0.6
-      
-      - name: Authenticate to GHCR
-        run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" | 
-          ko login ghcr.io --username ${{ github.actor }} --password-stdin
-
-      - name: Build + push multi-arch image with ko
-        run: |
-          ko build ./cmd \
-            --platform="${KO_PLATFORMS}" \
-            --tags "latest,${VERSION}" \
-            --sbom=cyclonedx \
-            --bare \
-            --push
-
-      - name: Install Cosign
-        uses: sigstore/cosign-installer@v3
-
-      - name: Sign the pushed image (key-less OIDC workflow)
-        run: |
-          IMAGE="ghcr.io/${{ github.repository }}:${{ env.VERSION }}"
-          cosign sign --yes "$IMAGE"
