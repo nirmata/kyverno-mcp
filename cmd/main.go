@@ -32,7 +32,7 @@ func init() {
 		fmt.Fprintln(flag.CommandLine.Output(), "  list_contexts   – List all available Kubernetes contexts")
 		fmt.Fprintln(flag.CommandLine.Output(), "  switch_context  – Switch to a different Kubernetes context (requires --context)")
 		fmt.Fprintln(flag.CommandLine.Output(), "  apply_policies  – Apply policies to a cluster")
-
+		fmt.Fprintln(flag.CommandLine.Output(), "  get_docs        – Get Kyverno documentation")
 		// Terminate after printing help to match standard behaviour.
 	}
 }
@@ -88,6 +88,7 @@ func main() {
 	tools.ListContexts(s)
 	tools.SwitchContext(s)
 	tools.ApplyPolicies(s)
+	tools.GetDocs(s)
 
 	// Start the MCP server
 	klog.Info("Starting MCP server on stdio...")
