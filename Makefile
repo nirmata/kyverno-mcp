@@ -1,96 +1,99 @@
-# Makefile for kyverno-mcp
-#
-# This Makefile provides a set of commands to build, run,
-# and manage the kyverno-mcp project.
-
-# Default target to run when no target is specified.
 .DEFAULT_GOAL := help
 
-# --- Variables ---
-# Define common variables to avoid repetition and ease maintenance.
-BIN_DIR      := ./bin
-CMD_DIR      := ./cmd
-BINARY_NAME  := kyverno-mcp
-BINARY_PATH  := $(BIN_DIR)/$(BINARY_NAME)
+BIN_DIR        := ./bin
+CMD_DIR        := ./cmd
+BINARY_NAME    := kyverno-mcp
+BINARY_PATH    := $(BIN_DIR)/$(BINARY_NAME)
 
-# Attempt to determine GOPATH/bin for installation.
-# Fallback to a common default if `go env GOPATH` fails or is empty.
-GOPATH_BIN   := $(shell go env GOPATH)/bin
-ifeq ($(GOPATH_BIN),/bin)
-	GOPATH_BIN := $(HOME)/go/bin
+GOPATH_BIN     := $(shell go env GOPATH 2>/dev/null)/bin
+ifeq ($(strip $(GOPATH_BIN)),/bin)
+  GOPATH_BIN := $(HOME)/go/bin
 endif
+export GOPATH_BIN
 
-# --- Environment Variables from .env ---
-# If a .env file exists, include it. This makes variables defined in .env
-# (e.g., API_KEY=123) available as Make variables.
-# Then, export these variables so they are available in the environment
-# for shell commands executed by Make recipes.
+VERSION       ?= $(shell git describe --dirty --always 2>/dev/null || echo dev)
+
+GOOS          ?= $(shell go env GOOS)
+GOARCH        ?= $(shell go env GOARCH)
+
 ifneq ($(wildcard .env),)
-	include .env
-	# Extract variable names from .env and export them.
-	# This assumes .env contains lines like VAR=value.
-	ENV_VARS_TO_EXPORT := $(shell awk -F= '{print $$1}' .env | xargs)
-	export $(ENV_VARS_TO_EXPORT)
+  include .env
+  ENV_VARS_TO_EXPORT := $(shell awk -F= '{print $$1}' .env | xargs)
+  export $(ENV_VARS_TO_EXPORT)
 endif
 
-# --- Help Target ---
-# Displays a list of available targets and their descriptions.
-# Descriptions are extracted from comments following '##'.
-help:
-	@echo "kyverno-mcp Makefile"
-	@echo "-------------------"
-	@echo "Available targets:"
-	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "  %-20s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+help: ## Show this help
+	@echo "Kyverno-MCP  –  available targets:"
+	@awk 'BEGIN{FS=":.*?## "}/^[a-zA-Z0-9_-]+:.*## /{printf "  %-18s %s\n",$$1,$$2}' $(MAKEFILE_LIST)
 
-# --- Build Tasks ---
-build: ## Build single binary for the current platform
-	@echo "λ Building $(BINARY_NAME) for current platform..."
+build: fmt vet tidy ## Build binary for current platform
+	@echo "Building $(BINARY_NAME) ($(GOOS)/$(GOARCH))..."
 	mkdir -p $(BIN_DIR)
-	go build -o $(BINARY_PATH) $(CMD_DIR)
+	CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) \
+	  go build -trimpath -ldflags="-s -w -X main.VERSION=$(VERSION)" \
+	  -o $(BINARY_PATH) $(CMD_DIR)
 
-# --- Run Tasks ---
-run: ## Run the application
-	@echo "λ Running $(BINARY_NAME) from source..."
+cross: ## Cross-compile – override GOOS / GOARCH:  make cross GOOS=darwin GOARCH=arm64
+	$(MAKE) build GOOS=$(GOOS) GOARCH=$(GOARCH)
+
+run: ## Run from source
+	@echo "Running from source..."
 	go run $(CMD_DIR)
 
-# --- Code Quality Tasks ---
-fmt: ## Format code using go fmt
-	@echo "λ Formatting code (using go fmt)..."
+inspect: build ## Run the built binary through MCP Inspector
+	@echo "Launching MCP Inspector..."
+	npx @modelcontextprotocol/inspector $(BINARY_PATH) --kubeconfig $$HOME/.kube/config
+
+fmt: ## go fmt
+	@echo "go fmt ..."
 	go fmt ./...
 
-vet: ## Run go vet using go vet
-	@echo "λ Running go vet (using go vet)..."
+vet: ## go vet
+	@echo "go vet ..."
 	go vet ./...
 
-tidy: ## Tidy go modules using go mod tidy
-	@echo "λ Tidying go modules (using go mod tidy)..."
-	rm -f go.sum
+tidy: ## go mod tidy
+	@echo "go mod tidy ..."
 	go mod tidy
 
-# --- Combined Tasks ---
-# 'check' depends on other verification tasks. They will run as prerequisites.
-check: fmt vet tidy build ## Run all verification checks
-	@echo "λ All checks completed."
+check: build ## fmt + vet + tidy + build
+	@echo "✔ All checks passed."
 
-# --- Maintenance Tasks ---
-clean: ## Clean build artifacts
-	@echo "λ Cleaning build artifacts..."
-	rm -rf $(BIN_DIR)
-	go mod tidy
-
-deps: ## Download Go module dependencies
-	@echo "λ Downloading Go module dependencies..."
+deps: ## go mod download
+	@echo "Downloading modules..."
 	go mod download
 
-update-deps: ## Update Go module dependencies and then tidy
-	@echo "λ Updating Go module dependencies..."
+update-deps: ## go get -u ./...  + tidy
+	@echo "Updating all modules to latest..."
 	go get -u ./...
-	@echo "λ Tidying modules after update..."
 	$(MAKE) tidy
 
-# --- Installation ---
-# 'install' depends on the 'build' target.
-install: build ## Install the binary to $(GOPATH_BIN)
-	@echo "λ Installing $(BINARY_NAME) to $(GOPATH_BIN)..."
+install: build ## Copy binary into GOPATH/bin
+	@echo "Installing to $(GOPATH_BIN)..."
+	mkdir -p $(GOPATH_BIN)
 	cp $(BINARY_PATH) $(GOPATH_BIN)/
-	@echo "$(BINARY_NAME) installed."
+
+KO_PLATFORMS ?= linux/amd64,linux/arm64
+KO_TAG      ?= latest
+KO_DOCKER_REPO ?= ghcr.io/nirmata/kyverno-mcp
+
+ko-build:
+	@echo "ko build ($(KO_PLATFORMS))"
+	ko build ./cmd \
+	--platform=$(KO_PLATFORMS) \
+	--tags=$(KO_TAG)
+
+ko-push:
+	@echo "ko build --push ($(KO_PLATFORMS))"
+	KO_DOCKER_REPO=$(KO_DOCKER_REPO) \
+	ko build ./cmd \
+	--platform=$(KO_PLATFORMS) \
+	--tags=$(KO_TAG) \
+	--push
+
+clean:
+	@echo "Cleaning…"
+	rm -rf $(BIN_DIR)
+
+.PHONY: help build run cross inspect fmt vet tidy check clean deps update-deps \
+        install ko-build ko-push

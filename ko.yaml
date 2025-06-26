@@ -1,0 +1,10 @@
+defaultBaseImage: gcr.io/distroless/static:nonroot
+builds:
+  - id: kyverno-mcp
+    main: ./cmd
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w
+      - -X=main.VERSION=${VERSION}
+    platforms: ["linux/amd64","linux/arm64"]

@@ -3,11 +3,11 @@ module kyverno-mcp
 go 1.24.1
 
 require (
-	github.com/golang/glog v1.2.4
 	github.com/mark3labs/mcp-go v0.32.0
 	k8s.io/api v0.32.3
 	k8s.io/apimachinery v0.32.3
 	k8s.io/client-go v0.32.3
+	k8s.io/klog/v2 v2.130.1
 )
 
 require (
@@ -348,7 +348,6 @@ require (
 	k8s.io/apiserver v0.32.3 // indirect
 	k8s.io/cli-runtime v0.32.3 // indirect
 	k8s.io/component-base v0.32.3 // indirect
-	k8s.io/klog/v2 v2.130.1 // indirect
 	k8s.io/kube-openapi v0.0.0-20250318190949-c8a335a9a2ff // indirect
 	k8s.io/kubectl v0.32.3 // indirect
 	k8s.io/pod-security-admission v0.32.3 // indirect
