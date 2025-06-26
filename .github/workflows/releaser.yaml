@@ -1,189 +1,172 @@
+# yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
+
 name: Release
 
-on:
-  workflow_run:
-    workflows: ["CI"] # name of the build/test workflow that must finish successfully
-    types:
-      - completed
-  workflow_dispatch:
-    inputs:
-      dry_run:
-        description: 'If set to true, goreleaser will run in snapshot mode and ko will not push'
-        required: false
-        default: 'true'
+permissions: 
+    id-token: write
+    contents: write
+    packages: write
 
-permissions:
-  id-token: write
-  contents: write
-  packages: write
+on:
+  push:
+    tags:
+      - 'v*'
+    branches: [ "main" ]
+
+concurrency:
+  group: ci-build-${{ github.ref_name }}
+  cancel-in-progress: true
 
 jobs:
   goreleaser:
     runs-on: blacksmith-2vcpu-ubuntu-2204
-    outputs:
-      version: ${{ steps.tag.outputs.version }}
+    permissions:
+      contents: write
+      id-token: write
+      packages: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
-          fetch-tags: true
-
-      - name: Verify tag commit is on main
-        run: |
-          git fetch origin main
-          if git branch --remote --contains ${{ github.event.workflow_run.head_sha }} | grep -q "origin/main"; then
-            echo "Tag commit is contained in main – proceeding with release."
-          else
-            echo "Tag commit is NOT contained in main. Aborting release."
-            exit 1
-          fi
-
-      - name: Extract tag
-        id: tag
-        run: |
-          tag=$(git describe --tags --exact-match)
-          echo "version=$tag" >> "$GITHUB_OUTPUT"
-
-      - name: Check if release already published
-        id: release_check
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG:      ${{ steps.tag.outputs.version }}
-        run: |
-          code=$(curl -s -o /dev/null -w "%{http_code}" \
-                 -H "Authorization: Bearer $GH_TOKEN" \
-                 -H "Accept: application/vnd.github+json" \
-                 https://api.github.com/repos/${{ github.repository }}/releases/tags/$TAG)
-          if [ "$code" = "200" ]; then
-            echo "exists=true"  >> "$GITHUB_OUTPUT"
-            echo "Release $TAG already exists – skipping artefact build."
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-            echo "No release yet for $TAG – continuing."
-          fi
       
-      - name: Inspect OIDC token
-        if: steps.release_check.outputs.exists == 'false'
-        run: |
-          raw=$(curl -s "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.amazonaws.com" \
-                    -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN")
-            echo "$raw" | jq -R 'split(".") | .[1] | @base64d | fromjson'
-      
-      - name: Configure AWS credentials for S3 upload
-        if: steps.release_check.outputs.exists == 'false'
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Set up Go
-        if: steps.release_check.outputs.exists == 'false'
-        uses: actions/setup-go@v5
+      - name: Setup Go
+        uses: actions/setup-go@3041bf56c941b39c61721a86cd11f3bb1338122a # v5.2.0
         with:
           go-version-file: go.mod
-          cache: true
+          cache-dependency-path: go.sum
 
       - name: Import GPG key
-        if: steps.release_check.outputs.exists == 'false'
-        uses: crazy-max/ghaction-import-gpg@v6
+        id: import_gpg
+        uses: crazy-max/ghaction-import-gpg@cb9bde2e2525e640591a934b1fd28eef1dcaf5e5 # v6.2.0
         with:
           gpg_private_key: ${{ secrets.GPG_PRIVATE_KEY }}
-          passphrase:      ${{ secrets.GPG_PASSPHRASE }}
+          passphrase: ${{ secrets.GPG_PASSPHRASE }}
 
-      - name: Cache go modules
-        if: steps.release_check.outputs.exists == 'false'
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/go-build
-            ${{ env.GOMODCACHE }}
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
+      - name: Check Homebrew formula version
+        run: |
+          if curl -s "https://raw.githubusercontent.com/nirmata/homebrew-tap/refs/heads/main/kyverno-mcp-rc.rb" > current.rb; then
+            current_version="$(grep -Eo 'version "([^"]+)"' current.rb | cut -d'"' -f 2)"
+            new_version="${GITHUB_REF#refs/tags/v}"
+            echo "Current Homebrew version: $current_version"
+            echo "New release version: $new_version"
+            
+            if dpkg --compare-versions "$new_version" "gt" "$current_version"; then
+              echo "SHOULD_UPDATE_BREW=true" >> $GITHUB_ENV
+              echo "New version is higher - will update brew"
+            else
+              echo "SHOULD_UPDATE_BREW=false" >> $GITHUB_ENV
+              echo "New version is not higher - will skip brew update"
+            fi
+          else
+            echo "Failed to fetch current formula - will skip brew update"
+            echo "SHOULD_UPDATE_BREW=false" >> $GITHUB_ENV
+          fi
+
+      - name: Clean up temporary files
+        run: |
+          rm -f current.rb
+          git status
 
       - name: Run GoReleaser
-        if: steps.release_check.outputs.exists == 'false' && inputs.dry_run != 'true'
-        uses: goreleaser/goreleaser-action@v6
+        uses: goreleaser/goreleaser-action@9ed2f89a662bf1735a48bc8557fd212fa902bebf # v6.1.0
         with:
           distribution: goreleaser
           version: latest
-          args: release --clean
+          args: release --clean --timeout 90m
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SHOULD_UPDATE_BREW: "true"
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-      
-      - name: Skip – release already present
-        if: steps.release_check.outputs.exists == 'true'
-        run: echo "✔︎ Nothing to do – assets are already on GitHub."
-  image:
+          SHOULD_UPDATE_BREW: ${{ env.SHOULD_UPDATE_BREW }}
+
+  ko:
+    env:
+      VERSION:  ${{ github.ref_name }}
+      KO_PLATFORMS:   linux/amd64,linux/arm64
+      KO_DOCKER_REPO: ghcr.io/nirmata/kyverno-mcp
     needs: goreleaser
     runs-on: blacksmith-2vcpu-ubuntu-2204
     permissions:
-      id-token: write
       contents: read
+      id-token: write
       packages: write
-    env:
-      VERSION:        ${{ needs.goreleaser.outputs.version }}
-      KO_PLATFORMS:   linux/amd64,linux/arm64
-      KO_DOCKER_REPO: ghcr.io/nirmata/kyverno-mcp
+      security-events: write
+    outputs:
+      tags: ${{ steps.tag.outputs.tags }}
+      digest: ${{ steps.ko-push.outputs.digest }}
     steps:
-      - name: Checkout source
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.workflow_run.head_sha }}
-          fetch-depth: 0
-
       - name: Install ko CLI
         uses: ko-build/setup-ko@v0.6
-          
-      - name: Check if GHCR image already exists
-        id: imgcheck
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO:     ${{ github.repository }}
-          TAG:      ${{ env.VERSION }}
-        run: |
-          repo_path="${REPO,,}"                    
-          code=$(curl -s -o /dev/null -w "%{http_code}" \
-                 -I \
-                 -H "Authorization: Bearer $GH_TOKEN" \
-                 -H "Accept: application/vnd.oci.image.manifest.v1+json" \
-                 https://ghcr.io/v2/${repo_path}/manifests/${TAG})
-          
-          if [ "$code" = "200" ]; then
-            echo "exists=true"  >> "$GITHUB_OUTPUT"
-            echo "Image ghcr.io/${repo_path}:${TAG} already present – skipping build."
-          elif [[ "$code" == 401 || "$code" == 404 ]]; then
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-            echo "No image for tag $TAG yet – will build & push."
-          else
-            echo "Unexpected registry response: $code" >&2
-            exit 1
-          fi
+        
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - name: Authenticate to GHCR
-        if: steps.imgcheck.outputs.exists == 'false'
-        run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" | 
-          ko login ghcr.io --username ${{ github.actor }} --password-stdin
+      - name: Set up Go
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
 
-      - name: Build + push multi-arch image with ko
-        if: steps.imgcheck.outputs.exists == 'false' && inputs.dry_run != 'true'
-        run: |
-          ko build ./cmd \
-            --platform="${KO_PLATFORMS}" \
-            --tags "latest,${VERSION}" \
-            --sbom=cyclonedx \
-            --bare \
-            --push
+      - name: Cache Go modules
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ runner.os }}-go-mod-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-mod-
+
+      - name: Cache Go build
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684
+        with:
+          path: ~/.cache/go-build
+          key: ${{ runner.os }}-go-build-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-build-
+
+      - name: Login
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Install Cosign
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3.9.1
 
-      - name: Sign the pushed image (key-less OIDC workflow)
-        if: steps.imgcheck.outputs.exists == 'false' && github.event.workflow_run.conclusion == 'success'
+      - name: Set Tag
+        id: tag
+        run: |
+          set -e
+          TAG_NAME="${GITHUB_REF#refs/heads/}"
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            TAG_NAME="${GITHUB_REF#refs/tags/}"
+          fi
+          echo "tags=${GITHUB_SHA},${TAG_NAME}" >> $GITHUB_OUTPUT
+
+      - name: Publish image
+        id: ko-push
+        run: |
+          set -e
+          digest=$(VERSION=${{ env.VERSION }} \
+          KO_TAG=${{ steps.tag.outputs.tags }} make ko-push | grep -Eo 'sha256:[0-9a-f]+' | head -n1)
+          echo "digest=ghcr.io/${{ github.repository }}@${digest}" >> "$GITHUB_OUTPUT"
+      
+      - name: Sign image
+        env:
+          COSIGN_EXPERIMENTAL: 1
         run: |
           IMAGE="ghcr.io/${{ github.repository }}:${{ env.VERSION }}"
           cosign sign --yes "$IMAGE"
+
+      - name: Verify the pushed tags
+        env:
+          COSIGN_EXPERIMENTAL: 1
+        run: |
+          cosign verify ${{ steps.ko-push.outputs.digest }} \
+            --certificate-identity-regexp="nirmata" --certificate-oidc-issuer-regexp="githubusercontent"

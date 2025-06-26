@@ -11,7 +11,7 @@ ifeq ($(strip $(GOPATH_BIN)),/bin)
 endif
 export GOPATH_BIN
 
-VERSION       ?= $(shell git describe --dirty --always 2>/dev/null || echo dev)
+VERSION       ?= $(shell git describe --dirty --tags --abbrev=0 --always 2>/dev/null || echo dev)
 
 GOOS          ?= $(shell go env GOOS)
 GOARCH        ?= $(shell go env GOARCH)
@@ -24,7 +24,7 @@ endif
 
 help: ## Show this help
 	@echo "Kyverno-MCP  –  available targets:"
-	@awk 'BEGIN{FS=":.*?## "}/^[a-zA-Z0-9_-]+:.*## /{printf "  %-18s %s\n",$$1,$$2}' $(MAKEFILE_LIST)
+	@awk 'BEGIN{FS=":.*?## "}/^[a-zA-Z0-9_-]+:.*## /{printf "  %-18s %s\n",$$1,$$2}' $(awk -F= '{print $$1}' .env | xargs)
 
 build: fmt vet tidy ## Build binary for current platform
 	@echo "Building $(BINARY_NAME) ($(GOOS)/$(GOARCH))..."
@@ -74,14 +74,16 @@ install: build ## Copy binary into GOPATH/bin
 	cp $(BINARY_PATH) $(GOPATH_BIN)/
 
 KO_PLATFORMS ?= linux/amd64,linux/arm64
-KO_TAG      ?= latest
+KO_TAG      ?= latest,$(VERSION)
 KO_DOCKER_REPO ?= ghcr.io/nirmata/kyverno-mcp
 
 ko-build:
 	@echo "ko build ($(KO_PLATFORMS))"
 	ko build ./cmd \
 	--platform=$(KO_PLATFORMS) \
-	--tags=$(KO_TAG)
+	--bare \
+	--tags=$(VERSION) \
+	--push=false
 
 ko-push:
 	@echo "ko build --push ($(KO_PLATFORMS))"
@@ -89,6 +91,7 @@ ko-push:
 	ko build ./cmd \
 	--platform=$(KO_PLATFORMS) \
 	--tags=$(KO_TAG) \
+	--bare \
 	--push
 
 clean:
