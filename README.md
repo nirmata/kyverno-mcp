@@ -28,7 +28,7 @@ If you have a personal access token in the `GITHUB_TOKEN` environment variable t
 
 2. Build the binary:
    ```bash
-   go build -o kyverno-mcp main.go
+   go build -o kyverno-mcp ./cmd
    ```
 
 ## Usage
@@ -59,6 +59,27 @@ If you have a personal access token in the `GITHUB_TOKEN` environment variable t
   }
 }
 ```
+
+### Running in a container (Docker / Podman)
+
+If you prefer not to install Go or the binary on the host you can build and run a container image instead.
+
+```bash
+# 1. Build the image
+docker build -t kyverno-mcp:latest .
+
+# 2. Run the server (mount your kubeconfig read-only)
+docker run --rm -i \
+  -v $HOME/.kube/config:/kube/config:ro \
+  kyverno-mcp:latest -- \
+  --kubeconfig /kube/config
+```
+
+Notes:
+
+1. The `--` tells Docker to pass the remaining flags to the `kyverno-mcp` binary inside the container.
+2. Inside the container the kubeconfig is expected at `/kube/config`, hence the corresponding flag value.
+3. Replace `$HOME/.kube/config` with an alternative path if your kubeconfig is elsewhere.
 
 ## Command Line Flags
 
@@ -108,5 +129,22 @@ Scan cluster resources using curated Kyverno policy sets, or policies from Git r
   "policySets": "all",
   "namespace": "default",
   "gitBranch": "main"
+}
+```
+
+### 4. Show Kyverno Violations
+
+Display all policy violations and errors from Kyverno `PolicyReport` (namespaced) and `ClusterPolicyReport` (cluster-wide) resources.
+
+If Kyverno is not installed in the active cluster, this tool instead returns a short set of Helm commands that you can run to install the Kyverno controller and its default policy sets.
+
+**Parameters:**
+- `namespace` (string, optional): Namespace whose `PolicyReports` should be returned (default: `default`). Cluster-wide `ClusterPolicyReports` are always included regardless of the value.
+
+**Example Request:**
+```json
+{
+  "tool": "show_violations",
+  "namespace": "default"
 }
 ```
