@@ -1,4 +1,4 @@
-name: ci
+name: PR
 
 on:
   pull_request:
@@ -14,7 +14,7 @@ permissions:
   contents: read
 
 jobs:
-  backend:
+  goreleaser:
     runs-on: blacksmith-2vcpu-ubuntu-2204
     steps:
       - name: Checkout
