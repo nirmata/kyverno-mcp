@@ -88,7 +88,7 @@ func main() {
 	tools.ListContexts(s)
 	tools.SwitchContext(s)
 	tools.ApplyPolicies(s)
-	tools.GetDocs(s)
+	tools.Help(s)
 
 	// Start the MCP server
 	klog.Info("Starting MCP server on stdio...")

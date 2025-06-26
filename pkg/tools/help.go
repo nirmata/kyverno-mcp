@@ -10,17 +10,17 @@ import (
 )
 
 //go:embed docs/installation.md
-var installationDoc string
+var installationHelp string
 
 //go:embed docs/troubleshooting.md
-var troubleshootingDoc string
+var troubleshootingHelp string
 
-func GetDocs(s *server.MCPServer) {
-	klog.InfoS("Registering tool: get_docs")
+func Help(s *server.MCPServer) {
+	klog.InfoS("Registering tool: help")
 	docTool := mcp.NewTool(
-		"get_docs",
+		"help",
 		mcp.WithDescription(`Get Kyverno documentation for installation and troubleshooting`),
-		mcp.WithString("type", mcp.Description(`Type of documentation to get between installation and troubleshooting Kyverno environment`)),
+		mcp.WithString("topic", mcp.Description(`Topic of documentation to get between installation and troubleshooting Kyverno environment`), mcp.Required()),
 	)
 
 	s.AddTool(docTool, func(_ context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -29,16 +29,16 @@ func GetDocs(s *server.MCPServer) {
 			return mcp.NewToolResultError("Error: invalid arguments format"), nil
 		}
 
-		docType, ok := args["type"].(string)
+		topic, ok := args["topic"].(string)
 		if !ok {
 			return mcp.NewToolResultError("Error: invalid documentation type"), nil
 		}
 
-		switch docType {
+		switch topic {
 		case "installation":
-			return mcp.NewToolResultText(installationDoc), nil
+			return mcp.NewToolResultText(installationHelp), nil
 		case "troubleshooting":
-			return mcp.NewToolResultText(troubleshootingDoc), nil
+			return mcp.NewToolResultText(troubleshootingHelp), nil
 		default:
 			return mcp.NewToolResultError("Error: invalid documentation type"), nil
 		}
