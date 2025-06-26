@@ -20,28 +20,45 @@ var kubeconfigPath string
 func init() {
 	flag.Usage = func() {
 		// Header
-		fmt.Fprintf(flag.CommandLine.Output(), "\nKyverno MCP Server – a Model-Context-Protocol server for Kyverno\n")
-		fmt.Fprintf(flag.CommandLine.Output(), "Usage: %s [flags]\n\n", os.Args[0])
+		if _, err := fmt.Fprintf(flag.CommandLine.Output(), "\nKyverno MCP Server – a Model-Context-Protocol server for Kyverno\n"); err != nil {
+			klog.ErrorS(err, "failed to write header")
+		}
+		if _, err := fmt.Fprintf(flag.CommandLine.Output(), "Usage: %s [flags]\n\n", os.Args[0]); err != nil {
+			klog.ErrorS(err, "failed to write usage")
+		}
 
 		// Flags
-		fmt.Fprintln(flag.CommandLine.Output(), "Flags:")
+		if _, err := fmt.Fprintln(flag.CommandLine.Output(), "Flags:"); err != nil {
+			klog.ErrorS(err, "failed to write flags header")
+		}
 		flag.PrintDefaults()
 
 		// Tooling section – keep this in sync with tools registered in pkg/tools.
-		fmt.Fprintln(flag.CommandLine.Output(), "\nAvailable tools exposed over MCP:")
-		fmt.Fprintln(flag.CommandLine.Output(), "  list_contexts   – List all available Kubernetes contexts")
-		fmt.Fprintln(flag.CommandLine.Output(), "  switch_context  – Switch to a different Kubernetes context (requires --context)")
-		fmt.Fprintln(flag.CommandLine.Output(), "  apply_policies  – Apply policies to a cluster")
-		fmt.Fprintln(flag.CommandLine.Output(), "  help            – Get Kyverno documentation for installation and troubleshooting")
-		fmt.Fprintln(flag.CommandLine.Output(), "  show_violations – Show violations for a given resource")
-    
+		if _, err := fmt.Fprintln(flag.CommandLine.Output(), "\nAvailable tools exposed over MCP:"); err != nil {
+			klog.ErrorS(err, "failed to write tools header")
+		}
+		msgs := []string{
+			"  list_contexts   – List all available Kubernetes contexts",
+			"  switch_context  – Switch to a different Kubernetes context (requires --context)",
+			"  apply_policies  – Apply policies to a cluster",
+			"  help            – Get Kyverno documentation for installation and troubleshooting",
+			"  show_violations – Show violations for a given resource",
+		}
+		for _, m := range msgs {
+			if _, err := fmt.Fprintln(flag.CommandLine.Output(), m); err != nil {
+				klog.ErrorS(err, "failed to write tool description", "tool", m)
+			}
+		}
+
 		// Terminate after printing help to match standard behaviour.
 	}
 }
 
 func main() {
 	klog.InitFlags(nil)
-	flag.Set("v", "2")
+	if err := flag.Set("v", "2"); err != nil {
+		klog.ErrorS(err, "failed to set klog verbosity")
+	}
 	// Define CLI flags (guard against duplicate registration from imported packages)
 	if flag.Lookup("kubeconfig") == nil {
 		flag.StringVar(&kubeconfigPath, "kubeconfig", "", "Path to the kubeconfig file to use. If not provided, defaults are used.")
