@@ -63,7 +63,9 @@ func applyPolicy(policyKey string, namespace string, gitBranch string, namespace
 
 	// Write the selected policy content to the temporary file
 	if _, err := tmpFile.Write(policyData); err != nil {
-		tmpFile.Close()
+		if cerr := tmpFile.Close(); cerr != nil {
+			klog.ErrorS(cerr, "failed to close temp file after write error")
+		}
 		return "", fmt.Errorf("failed to write policy data to temp file: %w", err)
 	}
 
@@ -73,10 +75,7 @@ func applyPolicy(policyKey string, namespace string, gitBranch string, namespace
 	}
 
 	// Determine if we should run cluster-wide (no namespace specified) or namespace-scoped.
-	clusterMode := false
-	if strings.TrimSpace(namespace) == "" {
-		clusterMode = true
-	}
+	clusterMode := strings.TrimSpace(namespace) == ""
 
 	applyCommandConfig := &apply.ApplyCommandConfig{
 		PolicyPaths:  []string{tmpFile.Name()},
