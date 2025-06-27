@@ -8,28 +8,16 @@ A Model Context Protocol (MCP) server that provides Kyverno policy management ca
 
 ## Installation
 
-### Option A: Quick install script (macOS/Linux)
+### Option A: Homebrew
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/nirmata/kyverno-mcp/main/install.sh | bash
+brew tap nirmata/tap
+brew install kyverno-mcp
 ```
 
-The script automatically detects your OS and CPU architecture, downloads the latest release tarball from GitHub, and installs the `kyverno-mcp` binary to `/usr/local/bin` (you may be prompted for sudo).
+### Option B: Nirmata downloads page
 
-If you have a personal access token in the `GITHUB_TOKEN` environment variable the script will use it to avoid GitHub API rate-limits.
-
-### Option B: Build from source
-
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/nirmata/kyverno-mcp
-   cd kyverno-mcp
-   ```
-
-2. Build the binary:
-   ```bash
-   go build -o kyverno-mcp ./cmd
-   ```
+Choose the appropriate architecture and platform here: https://downloads.nirmata.io/kyverno-mcp/downloads/
 
 ## Usage
 
@@ -113,9 +101,9 @@ Switch to a different Kubernetes context.
 }
 ```
 
-### 3. Scan Cluster
+### 3. Apply policies
 
-Scan cluster resources using curated Kyverno policy sets, or policies from Git repositories, or files.
+Apply policies to cluster resources using curated Kyverno policy sets, Git repositories, or local filesystem.
 
 **Parameters:**
 - `policySets` (string, optional): Policy set name (`pod-security`, `rbac-best-practices`, `kubernetes-best-practices`, `all`), or Git repository URLs, or file paths
