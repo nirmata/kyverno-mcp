@@ -75,6 +75,13 @@ Notes:
 
 ## Available Tools
 
+### Table of Contents
+
+- [1. list_contexts](#1-list-kubernetes-contexts)
+- [2. switch_context](#2-switch-kubernetes-context)
+- [3. apply_policies](#3-apply-policies)
+- [4. help](#4-kyverno-documentation-help)
+
 ### 1. List Kubernetes Contexts
 
 List all available Kubernetes contexts.
@@ -101,9 +108,10 @@ Switch to a different Kubernetes context.
 }
 ```
 
-### 3. Apply policies
+### 3. Apply Policies
 
 Apply policies to cluster resources using curated Kyverno policy sets, Git repositories, or local filesystem.
+
 
 **Parameters:**
 - `policySets` (string, optional): Policy set name (`pod-security`, `rbac-best-practices`, `kubernetes-best-practices`, `all`), or Git repository URLs, or file paths
@@ -134,5 +142,22 @@ If Kyverno is not installed in the active cluster, this tool instead returns a s
 {
   "tool": "show_violations",
   "namespace": "default"
+}
+```
+
+### 4. Kyverno Documentation Help
+
+Retrieve official Kyverno documentation snippets directly from the server. Useful for quick reference on installation steps or troubleshooting guidance without leaving your chat client.
+
+**Parameters:**
+- `topic` (string, required): Documentation topic to retrieve. Accepted values:
+  - `installation` – Kyverno installation guide
+  - `troubleshooting` – Common troubleshooting tips
+
+**Example Request:**
+```json
+{
+  "tool": "help",
+  "topic": "installation"
 }
 ```
