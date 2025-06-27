@@ -80,7 +80,8 @@ Notes:
 - [1. list_contexts](#1-list-kubernetes-contexts)
 - [2. switch_context](#2-switch-kubernetes-context)
 - [3. apply_policies](#3-apply-policies)
-- [4. help](#4-kyverno-documentation-help)
+- [4. show_violations](#4-show-policy-violations)
+- [5. help](#5-kyverno-documentation-help)
 
 ### 1. List Kubernetes Contexts
 
@@ -128,7 +129,7 @@ Apply policies to cluster resources using curated Kyverno policy sets, Git repos
 }
 ```
 
-### 4. Show Kyverno Violations
+### 4. Show Policy Violations
 
 Display all policy violations and errors from Kyverno `PolicyReport` (namespaced) and `ClusterPolicyReport` (cluster-wide) resources.
 
