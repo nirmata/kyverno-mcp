@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"kyverno-mcp/pkg/tools"
+	"net/http"
 	"os"
 	"time"
 
@@ -16,6 +17,16 @@ import (
 
 // kubeconfigPath holds the path to the kubeconfig file supplied via the --kubeconfig flag.
 var kubeconfigPath string
+
+// httpEnable determines if the Streamable HTTP server should be started.
+var httpEnable bool
+
+// httpAddr specifies the address the Streamable HTTP server will bind to.
+var httpAddr string
+
+// TLS certificate and key paths for optional HTTPS serving.
+var tlsCertPath string
+var tlsKeyPath string
 
 func init() {
 	flag.Usage = func() {
@@ -62,6 +73,20 @@ func main() {
 	// Define CLI flags (guard against duplicate registration from imported packages)
 	if flag.Lookup("kubeconfig") == nil {
 		flag.StringVar(&kubeconfigPath, "kubeconfig", "", "Path to the kubeconfig file to use. If not provided, defaults are used.")
+	}
+	// Streamable HTTP flags
+	if flag.Lookup("http") == nil {
+		flag.BoolVar(&httpEnable, "http", false, "Enable the Streamable HTTP server (streamable-http transport)")
+	}
+	if flag.Lookup("http-addr") == nil {
+		flag.StringVar(&httpAddr, "http-addr", ":8080", "Address to bind the Streamable HTTP server (ignored if --http is false)")
+	}
+	// TLS flags
+	if flag.Lookup("tls-cert") == nil {
+		flag.StringVar(&tlsCertPath, "tls-cert", "", "Path to TLS certificate file (enables HTTPS if provided with --tls-key)")
+	}
+	if flag.Lookup("tls-key") == nil {
+		flag.StringVar(&tlsKeyPath, "tls-key", "", "Path to TLS private key file (enables HTTPS if provided with --tls-cert)")
 	}
 
 	// Parse CLI flags early so subsequent init can rely on them. Capture ErrHelp
@@ -110,7 +135,34 @@ func main() {
 	tools.Help(s)
 	tools.ShowViolations(s)
 
-	// Start the MCP server
+	// Optionally start the Streamable HTTP server
+	if httpEnable {
+		klog.InfoS("Starting Streamable HTTP server", "addr", httpAddr)
+		streamSrv := server.NewStreamableHTTPServer(s)
+
+		// Configure HTTP server with our streamable handler
+		httpServer := &http.Server{
+			Addr:    httpAddr,
+			Handler: streamSrv,
+		}
+
+		go func() {
+			var err error
+			// If both TLS cert and key are provided, serve over HTTPS using TLS.
+			if tlsCertPath != "" && tlsKeyPath != "" {
+				klog.InfoS("TLS credentials detected – serving over HTTPS", "cert", tlsCertPath)
+				err = httpServer.ListenAndServeTLS(tlsCertPath, tlsKeyPath)
+			} else {
+				klog.Info("TLS credentials not provided – serving over plain HTTP")
+				err = httpServer.ListenAndServe()
+			}
+			if err != nil && err != http.ErrServerClosed {
+				klog.ErrorS(err, "Streamable HTTP server terminated with error")
+			}
+		}()
+	}
+
+	// Start the MCP server on stdio
 	klog.Info("Starting MCP server on stdio...")
 	var err error
 	if err = server.ServeStdio(s); err != nil {
