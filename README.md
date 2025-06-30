@@ -33,6 +33,31 @@ Choose the appropriate architecture and platform here: https://downloads.nirmata
 # The server always starts in the kubeconfig's current context; use the `switch_context` tool to change it at runtime.
 ```
 
+#### Exposing the MCP transport over HTTP(S)
+
+If you need to expose the server over the network (for example to a browser-based or remote MCP client) you can enable the built-in **Streamable HTTP** transport:
+
+```bash
+# Plain HTTP  (🚫 NOT recommended for production – use ONLY for local testing on a trusted network)
+./kyverno-mcp --http --http-addr :8080
+
+# HTTPS with TLS  (✅ Recommended for production usage)
+./kyverno-mcp \
+  --http \
+  --http-addr :8443 \
+  --tls-cert /path/to/cert.pem \
+  --tls-key  /path/to/key.pem
+
+# Alternatively, run the server without the --tls-* flags and terminate TLS in
+# a reverse-proxy such as NGINX, Caddy, or a cloud load balancer.
+```
+
+Plain HTTP traffic is unencrypted and vulnerable to eavesdropping and
+man-in-the-middle attacks; therefore **never expose the server over plain HTTP in
+production**. Always provide valid `--tls-cert` and `--tls-key` files **or** place
+the binary behind an HTTPS-terminating proxy when making the service reachable
+outside of localhost.
+
 ### Using it with an MCP Client (Claude Desktop, Amazon Q, Cursor, etc.)
 
 ```json
@@ -72,6 +97,10 @@ Notes:
 ## Command Line Flags
 
 - `--kubeconfig` (string): Path to the kubeconfig file (defaults to the value of $KUBECONFIG, or ~/.kube/config if unset)
+- `--http` (bool): Enable the Streamable HTTP transport (disabled by default)
+- `--http-addr` (string): Address to bind the HTTP(S) server (default `:8080`)
+- `--tls-cert` (string): Path to the TLS certificate file – **required for HTTPS** (optional if TLS is terminated elsewhere)
+- `--tls-key` (string): Path to the TLS private key – **required for HTTPS** (optional if TLS is terminated elsewhere)
 
 ## Available Tools
 
