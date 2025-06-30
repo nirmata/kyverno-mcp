@@ -74,12 +74,9 @@ func applyPolicy(policyKey string, namespace string, gitBranch string, namespace
 		return "", fmt.Errorf("failed to close temp policy file: %w", err)
 	}
 
-	// Determine if we should run cluster-wide (no namespace specified) or namespace-scoped.
-	clusterMode := strings.TrimSpace(namespace) == ""
-
 	applyCommandConfig := &apply.ApplyCommandConfig{
 		PolicyPaths:  []string{tmpFile.Name()},
-		Cluster:      clusterMode,
+		Cluster:      true,
 		Namespace:    namespace,
 		PolicyReport: true,
 		OutputFormat: "json",
