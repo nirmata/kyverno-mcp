@@ -2,7 +2,6 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: kyverno-mcp
-  namespace: kagent
   labels:
     app: kyverno-mcp
 spec:
