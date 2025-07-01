@@ -41,7 +41,11 @@ spec:
               port: 8000
             initialDelaySeconds: 10
             periodSeconds: 30
-          volumes:
+          volumeMounts:
             - name: tls-certs
-              secret:
-                secretName: kyverno-mcp-tls
+              mountPath: /etc/tls
+              readOnly: true
+      volumes:
+        - name: tls-certs
+          secret:
+            secretName: kyverno-mcp-tls
