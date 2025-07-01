@@ -94,6 +94,46 @@ Notes:
 2. Inside the container the kubeconfig is expected at `/kube/config`, hence the corresponding flag value.
 3. Replace `$HOME/.kube/config` with an alternative path if your kubeconfig is elsewhere.
 
+## Deploying on Kubernetes
+
+Sample manifests are provided under `k8s-manifests/`. They do **not** specify a namespace so that you can deploy the server wherever you like. Pass `-n <namespace>` (or add a `namespace:` field to the YAML) when applying them:
+
+```bash
+# (Optional) create a namespace first
+kubectl create namespace kyverno-mcp
+
+# Deploy the MCP server
+kubectl apply -n kyverno-mcp -f k8s-manifests/deployment.yaml
+kubectl apply -n kyverno-mcp -f k8s-manifests/service.yaml
+```
+
+### TLS secret
+
+The Deployment expects a TLS certificate/key pair to be mounted from a Kubernetes secret named **`kyverno-mcp-tls`**. Create this secret **in the same namespace** where the Deployment lives:
+
+```bash
+kubectl -n kyverno-mcp create secret tls kyverno-mcp-tls \
+  --cert=/path/to/tls.crt \
+  --key=/path/to/tls.key
+```
+
+If you choose a different secret name, update the `secretName` field under `spec.template.spec.volumes[0]` accordingly.
+
+### Running with Kagents
+
+When running with [Kagents](https://github.com/kagent-dev/kagent/tree/main) you must deploy the MCP server to the **`kagent`** namespace so that the agents can discover it:
+
+```bash
+# If the namespace does not yet exist
+kubectl create namespace kagent
+
+# Deploy to the kagent namespace
+kubectl apply -n kagent -f k8s-manifests/deployment.yaml
+kubectl apply -n kagent -f k8s-manifests/service.yaml
+```
+
+> Remember: the manifests do **not** embed a namespace. If you omit `-n kagent` they will be created in the `default` namespace, which will break TLS mounting and kagent discovery.
+
 ## Command Line Flags
 
 - `--kubeconfig` (string): Path to the kubeconfig file (defaults to the value of $KUBECONFIG, or ~/.kube/config if unset)
