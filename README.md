@@ -121,7 +121,7 @@ If you choose a different secret name, update the `secretName` field under `spec
 
 ### Running with Kagent
 
-When running with [Kagents](https://github.com/kagent-dev/kagent/tree/main) you must deploy the MCP server to the **`kagent`** namespace so that the agents can discover it:
+When running with [Kagent](https://github.com/kagent-dev/kagent/tree/main) you must deploy the MCP server to the **`kagent`** namespace so that the agents can discover it:
 
 ```bash
 # If the namespace does not yet exist
