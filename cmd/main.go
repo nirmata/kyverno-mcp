@@ -20,9 +20,6 @@ import (
 // kubeconfigPath holds the path to the kubeconfig file supplied via the --kubeconfig flag.
 var kubeconfigPath string
 
-// httpEnable determines if the Streamable HTTP server should be started.
-var httpEnable bool
-
 // httpAddr specifies the address the Streamable HTTP server will bind to.
 var httpAddr string
 
@@ -77,10 +74,6 @@ func main() {
 	// Define CLI flags (guard against duplicate registration from imported packages)
 	if flag.Lookup("kubeconfig") == nil {
 		flag.StringVar(&kubeconfigPath, "kubeconfig", "", "Path to the kubeconfig file to use. If not provided, defaults are used.")
-	}
-	// Streamable HTTP flags
-	if flag.Lookup("http") == nil {
-		flag.BoolVar(&httpEnable, "http", false, "Enable the Streamable HTTP server (streamable-http transport)")
 	}
 	if flag.Lookup("http-addr") == nil {
 		flag.StringVar(&httpAddr, "http-addr", ":8080", "Address to bind the Streamable HTTP server (ignored if --http is false)")
@@ -139,13 +132,25 @@ func main() {
 	tools.ShowViolations(s)
 
 	// Optionally start the Streamable HTTP server
-	if httpEnable {
-		// Enforce HTTPS: both --tls-cert and --tls-key MUST be provided.
-		if tlsCert == "" || tlsKey == "" {
-			klog.Error("HTTPS mode requires both --tls-cert and --tls-key flags to be provided. Exiting.")
-			os.Exit(1)
+	if httpAddr != "" {
+		// Create the streamable HTTP handler backed by our MCP server
+		streamSrv := server.NewStreamableHTTPServer(s)
+
+		// net/http server configuration (HTTPS only)
+		httpServer := &http.Server{
+			Addr:    httpAddr,
+			Handler: streamSrv,
 		}
 
+		klog.InfoS("Starting Streamable HTTP server", "addr", httpAddr)
+
+		// Run the server in a goroutine so that the main thread can continue to serve stdio
+		go func() {
+			if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				klog.ErrorS(err, "Streamable HTTP server terminated with error")
+			}
+		}()
+	} else if tlsCert != "" && tlsKey != "" {
 		// Create the streamable HTTP handler backed by our MCP server
 		streamSrv := server.NewStreamableHTTPServer(s)
 
@@ -163,15 +168,15 @@ func main() {
 				klog.ErrorS(err, "Streamable HTTPS server terminated with error")
 			}
 		}()
+	} else {
+		// Start the MCP server on stdio in its own goroutine
+		klog.Info("Starting MCP server on stdio...")
+		go func() {
+			if err := server.ServeStdio(s); err != nil {
+				klog.ErrorS(err, "error in MCP stdio server")
+			}
+		}()
 	}
-
-	// Start the MCP server on stdio in its own goroutine
-	klog.Info("Starting MCP server on stdio...")
-	go func() {
-		if err := server.ServeStdio(s); err != nil {
-			klog.ErrorS(err, "error in MCP stdio server")
-		}
-	}()
 
 	// ------------------------------------------------------------------
 	// Block main goroutine until an OS termination signal is received.
