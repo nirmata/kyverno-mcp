@@ -39,14 +39,13 @@ If you need to expose the server over the network (for example to a browser-base
 
 ```bash
 # Plain HTTP  (🚫 NOT recommended for production – use ONLY for local testing on a trusted network)
-./kyverno-mcp --http --http-addr :8080
+./kyverno-mcp --http-addr :8080
 
 # HTTPS with TLS  (✅ Recommended for production usage)
 ./kyverno-mcp \
-  --http \
   --http-addr :8443 \
   --tls-cert /path/to/cert.pem \
-  --tls-key  /path/to/key.pem
+  --tls-key /path/to/key.pem
 
 # Alternatively, run the server without the --tls-* flags and terminate TLS in
 # a reverse-proxy such as NGINX, Caddy, or a cloud load balancer.
@@ -97,10 +96,14 @@ Notes:
 ## Command Line Flags
 
 - `--kubeconfig` (string): Path to the kubeconfig file (defaults to the value of $KUBECONFIG, or ~/.kube/config if unset)
-- `--http` (bool): Enable the Streamable HTTP transport (disabled by default)
-- `--http-addr` (string): Address to bind the HTTP(S) server (default `:8080`)
-- `--tls-cert` (string): Path to the TLS certificate file – **required for HTTPS** (optional if TLS is terminated elsewhere)
-- `--tls-key` (string): Path to the TLS private key – **required for HTTPS** (optional if TLS is terminated elsewhere)
+- `--http-addr` (string): Address to bind the HTTP(S) server. If not provided, the server runs on stdio (default mode)
+- `--tls-cert` (string): Path to the TLS certificate file. When provided with `--tls-key`, enables HTTPS
+- `--tls-key` (string): Path to the TLS private key file. When provided with `--tls-cert`, enables HTTPS
+
+**Note:** The server automatically determines the transport mode:
+- If `--http-addr` is provided with both `--tls-cert` and `--tls-key`, it runs as HTTPS
+- If `--http-addr` is provided without TLS credentials, it runs as plain HTTP
+- If `--http-addr` is not provided, it runs on stdio (default)
 
 ## Available Tools
 

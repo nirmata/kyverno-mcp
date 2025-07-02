@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kyverno-mcp
+  labels:
+    app: kyverno-mcp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kyverno-mcp
+  template:
+    metadata:
+      labels:
+        app: kyverno-mcp
+    spec:
+      containers:
+        - name: kyverno-mcp
+          image: ghcr.io/nirmata/kyverno-mcp:v0.1.0-rc.7
+          args:
+            - --http-addr
+            - :8000
+            - --tls-cert
+            - /etc/tls/tls.crt
+            - --tls-key
+            - /etc/tls/tls.key
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          resources:
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+          livenessProbe:
+            httpGet:
+              path: /mcp
+              port: 8000
+              scheme: HTTPS
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          volumeMounts:
+            - name: tls-certs
+              mountPath: /etc/tls
+              readOnly: true
+      volumes:
+        - name: tls-certs
+          secret:
+            secretName: kyverno-mcp-tls
+      imagePullSecrets:
+         - name: nirmata-ghcr
