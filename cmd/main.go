@@ -88,8 +88,9 @@ func main() {
 	// Parse CLI flags early so subsequent init can rely on them. Capture ErrHelp
 	if err := flag.CommandLine.Parse(os.Args[1:]); err == flag.ErrHelp {
 		// flag package has already printed the usage message via flag.Usage
-		os.Exit(0)
 		defer klog.Flush()
+		os.Exit(0)
+
 	}
 
 	// If the kubeconfig flag was registered elsewhere, capture its value
