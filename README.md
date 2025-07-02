@@ -39,14 +39,13 @@ If you need to expose the server over the network (for example to a browser-base
 
 ```bash
 # Plain HTTP  (🚫 NOT recommended for production – use ONLY for local testing on a trusted network)
-./kyverno-mcp --http --http-addr :8080
+./kyverno-mcp --http-addr :8080
 
 # HTTPS with TLS  (✅ Recommended for production usage)
 ./kyverno-mcp \
-  --http \
   --http-addr :8443 \
   --tls-cert /path/to/cert.pem \
-  --tls-key  /path/to/key.pem
+  --tls-key /path/to/key.pem
 
 # Alternatively, run the server without the --tls-* flags and terminate TLS in
 # a reverse-proxy such as NGINX, Caddy, or a cloud load balancer.
@@ -94,53 +93,17 @@ Notes:
 2. Inside the container the kubeconfig is expected at `/kube/config`, hence the corresponding flag value.
 3. Replace `$HOME/.kube/config` with an alternative path if your kubeconfig is elsewhere.
 
-## Deploying on Kubernetes
-
-Sample manifests are provided under `k8s-manifests/`. They do **not** specify a namespace so that you can deploy the server wherever you like. Pass `-n <namespace>` (or add a `namespace:` field to the YAML) when applying them:
-
-```bash
-# (Optional) create a namespace first
-kubectl create namespace kyverno-mcp
-
-# Deploy the MCP server
-kubectl apply -n kyverno-mcp -f k8s-manifests/deployment.yaml
-kubectl apply -n kyverno-mcp -f k8s-manifests/service.yaml
-```
-
-### TLS secret
-
-The Deployment expects a TLS certificate/key pair to be mounted from a Kubernetes secret named **`kyverno-mcp-tls`**. Create this secret **in the same namespace** where the Deployment lives:
-
-```bash
-kubectl -n kyverno-mcp create secret tls kyverno-mcp-tls \
-  --cert=/path/to/tls.crt \
-  --key=/path/to/tls.key
-```
-
-If you choose a different secret name, update the `secretName` field under `spec.template.spec.volumes[0]` accordingly.
-
-### Running with Kagent
-
-When running with [Kagent](https://github.com/kagent-dev/kagent/tree/main) you must deploy the MCP server to the **`kagent`** namespace so that the agents can discover it:
-
-```bash
-# If the namespace does not yet exist
-kubectl create namespace kagent
-
-# Deploy to the kagent namespace
-kubectl apply -n kagent -f k8s-manifests/deployment.yaml
-kubectl apply -n kagent -f k8s-manifests/service.yaml
-```
-
-> Remember: the manifests do **not** embed a namespace. If you omit `-n kagent` they will be created in the `default` namespace, which will break TLS mounting and kagent discovery.
-
 ## Command Line Flags
 
 - `--kubeconfig` (string): Path to the kubeconfig file (defaults to the value of $KUBECONFIG, or ~/.kube/config if unset)
-- `--http` (bool): Enable the Streamable HTTP transport (disabled by default)
-- `--http-addr` (string): Address to bind the HTTP(S) server (default `:8080`)
-- `--tls-cert` (string): Path to the TLS certificate file – **required for HTTPS** (optional if TLS is terminated elsewhere)
-- `--tls-key` (string): Path to the TLS private key – **required for HTTPS** (optional if TLS is terminated elsewhere)
+- `--http-addr` (string): Address to bind the HTTP(S) server. If not provided, the server runs on stdio (default mode)
+- `--tls-cert` (string): Path to the TLS certificate file. When provided with `--tls-key`, enables HTTPS
+- `--tls-key` (string): Path to the TLS private key file. When provided with `--tls-cert`, enables HTTPS
+
+**Note:** The server automatically determines the transport mode:
+- If `--http-addr` is provided with both `--tls-cert` and `--tls-key`, it runs as HTTPS
+- If `--http-addr` is provided without TLS credentials, it runs as plain HTTP
+- If `--http-addr` is not provided, it runs on stdio (default)
 
 ## Available Tools
 
