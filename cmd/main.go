@@ -8,6 +8,8 @@ import (
 	"kyverno-mcp/pkg/tools"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"k8s.io/klog/v2"
@@ -23,6 +25,12 @@ var httpEnable bool
 
 // httpAddr specifies the address the Streamable HTTP server will bind to.
 var httpAddr string
+
+// tlsCert specifies the path to the TLS certificate file.
+var tlsCert string
+
+// tlsKey specifies the path to the TLS key file.
+var tlsKey string
 
 func init() {
 	flag.Usage = func() {
@@ -77,6 +85,12 @@ func main() {
 	if flag.Lookup("http-addr") == nil {
 		flag.StringVar(&httpAddr, "http-addr", ":8080", "Address to bind the Streamable HTTP server (ignored if --http is false)")
 	}
+	if flag.Lookup("tls-cert") == nil {
+		flag.StringVar(&tlsCert, "tls-cert", "", "Path to the TLS certificate file to use. If not provided, defaults are used.")
+	}
+	if flag.Lookup("tls-key") == nil {
+		flag.StringVar(&tlsKey, "tls-key", "", "Path to the TLS key file to use. If not provided, defaults are used.")
+	}
 
 	// Parse CLI flags early so subsequent init can rely on them. Capture ErrHelp
 	if err := flag.CommandLine.Parse(os.Args[1:]); err == flag.ErrHelp {
@@ -126,27 +140,47 @@ func main() {
 
 	// Optionally start the Streamable HTTP server
 	if httpEnable {
-		klog.InfoS("Starting Streamable HTTP server", "addr", httpAddr)
+		// Enforce HTTPS: both --tls-cert and --tls-key MUST be provided.
+		if tlsCert == "" || tlsKey == "" {
+			klog.Error("HTTPS mode requires both --tls-cert and --tls-key flags to be provided. Exiting.")
+			os.Exit(1)
+		}
+
+		// Create the streamable HTTP handler backed by our MCP server
 		streamSrv := server.NewStreamableHTTPServer(s)
 
-		// Configure HTTP server with our streamable handler
+		// net/http server configuration (HTTPS only)
 		httpServer := &http.Server{
 			Addr:    httpAddr,
 			Handler: streamSrv,
 		}
 
+		klog.InfoS("Starting Streamable HTTPS server", "addr", httpAddr, "tlsCert", tlsCert, "tlsKey", tlsKey)
+
+		// Run the server in a goroutine so that the main thread can continue to serve stdio
 		go func() {
-			err := httpServer.ListenAndServe()
-			if err != nil && err != http.ErrServerClosed {
-				klog.ErrorS(err, "Streamable HTTP server terminated with error")
+			if err := httpServer.ListenAndServeTLS(tlsCert, tlsKey); err != nil && err != http.ErrServerClosed {
+				klog.ErrorS(err, "Streamable HTTPS server terminated with error")
 			}
 		}()
 	}
 
-	// Start the MCP server on stdio
+	// Start the MCP server on stdio in its own goroutine
 	klog.Info("Starting MCP server on stdio...")
-	var err error
-	if err = server.ServeStdio(s); err != nil {
-		klog.ErrorS(err, "error starting server")
-	}
+	go func() {
+		if err := server.ServeStdio(s); err != nil {
+			klog.ErrorS(err, "error in MCP stdio server")
+		}
+	}()
+
+	// ------------------------------------------------------------------
+	// Block main goroutine until an OS termination signal is received.
+	// ------------------------------------------------------------------
+	stopCh := make(chan os.Signal, 1)
+	signal.Notify(stopCh, syscall.SIGINT, syscall.SIGTERM)
+
+	klog.Info("Server started. Waiting for termination signal...")
+	<-stopCh
+
+	klog.Info("Termination signal received. Exiting.")
 }

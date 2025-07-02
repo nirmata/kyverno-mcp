@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: kyverno-mcp
-          image: ghcr.io/nirmata/kyverno-mcp:v0.1.0.rc.7
+          image: ghcr.io/nirmata/kyverno-mcp:v0.1.0-rc.7
           args:
             - --http
             - --http-addr
@@ -39,6 +39,7 @@ spec:
             httpGet:
               path: /mcp
               port: 8000
+              scheme: HTTPS
             initialDelaySeconds: 10
             periodSeconds: 30
           volumeMounts:
@@ -49,3 +50,5 @@ spec:
         - name: tls-certs
           secret:
             secretName: kyverno-mcp-tls
+      imagePullSecrets:
+         - name: nirmata-ghcr
