@@ -119,7 +119,7 @@ kubectl -n kyverno-mcp create secret tls kyverno-mcp-tls \
 
 If you choose a different secret name, update the `secretName` field under `spec.template.spec.volumes[0]` accordingly.
 
-### Running with Kagents
+### Running with Kagent
 
 When running with [Kagents](https://github.com/kagent-dev/kagent/tree/main) you must deploy the MCP server to the **`kagent`** namespace so that the agents can discover it:
 
