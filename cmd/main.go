@@ -68,6 +68,7 @@ func init() {
 
 func main() {
 	klog.InitFlags(nil)
+	defer klog.Flush()
 	if err := flag.Set("v", "2"); err != nil {
 		klog.ErrorS(err, "failed to set klog verbosity")
 	}
@@ -76,7 +77,7 @@ func main() {
 		flag.StringVar(&kubeconfigPath, "kubeconfig", "", "Path to the kubeconfig file to use. If not provided, defaults are used.")
 	}
 	if flag.Lookup("http-addr") == nil {
-		flag.StringVar(&httpAddr, "http-addr", ":8080", "Address to bind the Streamable HTTP server (ignored if --http is false)")
+		flag.StringVar(&httpAddr, "http-addr", "", "Address to bind the Streamable HTTP server (ignored if --http is false)")
 	}
 	if flag.Lookup("tls-cert") == nil {
 		flag.StringVar(&tlsCert, "tls-cert", "", "Path to the TLS certificate file to use. If not provided, defaults are used.")
@@ -88,9 +89,7 @@ func main() {
 	// Parse CLI flags early so subsequent init can rely on them. Capture ErrHelp
 	if err := flag.CommandLine.Parse(os.Args[1:]); err == flag.ErrHelp {
 		// flag package has already printed the usage message via flag.Usage
-		defer klog.Flush()
-		os.Exit(0)
-
+		return
 	}
 
 	// If the kubeconfig flag was registered elsewhere, capture its value
@@ -132,30 +131,12 @@ func main() {
 	tools.Help(s)
 	tools.ShowViolations(s)
 
-	// Optionally start the Streamable HTTP server
-	if httpAddr != "" {
+	// Prefer HTTPS when TLS credentials are supplied. If not, fall back to plain HTTP.
+	if tlsCert != "" && tlsKey != "" {
 		// Create the streamable HTTP handler backed by our MCP server
 		streamSrv := server.NewStreamableHTTPServer(s)
 
-		// net/http server configuration (HTTPS only)
-		httpServer := &http.Server{
-			Addr:    httpAddr,
-			Handler: streamSrv,
-		}
-
-		klog.InfoS("Starting Streamable HTTP server", "addr", httpAddr)
-
-		// Run the server in a goroutine so that the main thread can continue to serve stdio
-		go func() {
-			if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-				klog.ErrorS(err, "Streamable HTTP server terminated with error")
-			}
-		}()
-	} else if tlsCert != "" && tlsKey != "" {
-		// Create the streamable HTTP handler backed by our MCP server
-		streamSrv := server.NewStreamableHTTPServer(s)
-
-		// net/http server configuration (HTTPS only)
+		// net/http server configuration (HTTPS)
 		httpServer := &http.Server{
 			Addr:    httpAddr,
 			Handler: streamSrv,
@@ -167,6 +148,24 @@ func main() {
 		go func() {
 			if err := httpServer.ListenAndServeTLS(tlsCert, tlsKey); err != nil && err != http.ErrServerClosed {
 				klog.ErrorS(err, "Streamable HTTPS server terminated with error")
+			}
+		}()
+	} else if httpAddr != "" {
+		// Create the streamable HTTP handler backed by our MCP server
+		streamSrv := server.NewStreamableHTTPServer(s)
+
+		// net/http server configuration (HTTP)
+		httpServer := &http.Server{
+			Addr:    httpAddr,
+			Handler: streamSrv,
+		}
+
+		klog.InfoS("Starting Streamable HTTP server", "addr", httpAddr)
+
+		// Run the server in a goroutine so that the main thread can continue to serve stdio
+		go func() {
+			if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				klog.ErrorS(err, "Streamable HTTP server terminated with error")
 			}
 		}()
 	} else {
