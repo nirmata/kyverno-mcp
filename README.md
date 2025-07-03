@@ -93,6 +93,63 @@ Notes:
 2. Inside the container the kubeconfig is expected at `/kube/config`, hence the corresponding flag value.
 3. Replace `$HOME/.kube/config` with an alternative path if your kubeconfig is elsewhere.
 
+### Running in Kubernetes
+
+The `k8s-manifests/` directory contains Kubernetes deployment manifests. By default, these are configured for **HTTPS** with TLS certificates.
+
+#### Default Configuration (HTTPS)
+
+The default manifests use HTTPS:
+- `service.yaml`: Exposes port 443 (HTTPS)
+- `deployment.yaml`: Includes TLS certificate configuration
+
+```bash
+kubectl apply -f k8s-manifests/
+```
+
+#### Switching to HTTP Configuration
+
+If you prefer to run without TLS (🚫 **NOT recommended for production**), you need to modify both manifests:
+
+**1. Update `k8s-manifests/service.yaml`:**
+```yaml
+ports:
+  - port: 80        # Change from 443 to 80
+    targetPort: 8000
+```
+
+**2. Update `k8s-manifests/deployment.yaml`:**
+Remove the TLS-related arguments and volume mounts:
+```yaml
+args:
+  - --http-addr
+  - :8000
+  # Remove these TLS lines:
+  # - --tls-cert
+  # - /etc/tls/tls.crt
+  # - --tls-key
+  # - /etc/tls/tls.key
+
+# Also remove the TLS volume mount and volume sections:
+# volumeMounts:
+#   - name: tls-certs
+#     mountPath: /etc/tls
+#     readOnly: true
+# volumes:
+#   - name: tls-certs
+#     secret:
+#       secretName: kyverno-mcp-tls
+```
+
+**3. Update the liveness probe scheme:**
+```yaml
+livenessProbe:
+  httpGet:
+    path: /mcp
+    port: 8000
+    scheme: HTTP    # Change from HTTPS to HTTP
+```
+
 ## Command Line Flags
 
 - `--kubeconfig` (string): Path to the kubeconfig file (defaults to the value of $KUBECONFIG, or ~/.kube/config if unset)
