@@ -29,8 +29,8 @@ func ShowViolations(s *server.MCPServer) {
 		mcp.NewTool(
 			"show_violations",
 			mcp.WithDescription(`This tool is used when Kyverno is installed in the cluster. It returns all non-passing Kyverno PolicyReport results for a workload.`),
-			mcp.WithString("namespace", mcp.Description(`Namespace (default: default)`), mcp.DefaultString("default")),
-			mcp.WithString("namespace_exclude", mcp.Description(`Comma-separated namespaces to exclude (default: kube-system,kyverno)`), mcp.DefaultString("kube-system,kyverno")),
+			mcp.WithString("namespace", mcp.Description(`Namespace to query (default: default, use "all" for all namespaces)`), mcp.DefaultString("default")),
+			mcp.WithString("namespace_exclude", mcp.Description(`Comma-separated namespaces to exclude when namespace="all" (default: kube-system,kyverno)`), mcp.DefaultString("kube-system,kyverno")),
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			ns, _ := req.RequireString("namespace")
@@ -85,16 +85,24 @@ func gatherViolationsJSON(ctx context.Context, ns, nsExclude string) ([]byte, er
 		ns = "default"
 	}
 
-	excludeSet := common.ParseNamespaceExcludes(nsExclude)
+	// Determine if we should apply namespace exclude filtering
+	// Only apply exclude filtering when querying "all" namespaces
+	queryAllNamespaces := ns == "all"
+	var excludeSet map[string]struct{}
+	if queryAllNamespaces {
+		excludeSet = common.ParseNamespaceExcludes(nsExclude)
+	}
 
 	var allResults []policyreportv1alpha2.PolicyReportResult
 
 	// Helper function to process PolicyReport items
 	addPolicyReportResults := func(items []unstructured.Unstructured) error {
 		for _, u := range items {
-			// Skip if namespace is excluded
-			if _, skip := excludeSet[u.GetNamespace()]; skip {
-				continue
+			// Skip if namespace is excluded (only when querying all namespaces)
+			if queryAllNamespaces {
+				if _, skip := excludeSet[u.GetNamespace()]; skip {
+					continue
+				}
 			}
 
 			// Convert unstructured to typed PolicyReport
@@ -158,7 +166,17 @@ func gatherViolationsJSON(ctx context.Context, ns, nsExclude string) ([]byte, er
 	// 1. Namespaced PolicyReports
 	// ---------------------------------------------------------------------
 	if polrGVR.Resource != "" {
-		prList, err := dyn.Resource(polrGVR).Namespace(ns).List(ctx, metav1.ListOptions{})
+		var prList *unstructured.UnstructuredList
+		var err error
+
+		if queryAllNamespaces {
+			// Query all namespaces
+			prList, err = dyn.Resource(polrGVR).List(ctx, metav1.ListOptions{})
+		} else {
+			// Query specific namespace
+			prList, err = dyn.Resource(polrGVR).Namespace(ns).List(ctx, metav1.ListOptions{})
+		}
+
 		if err != nil {
 			klog.ErrorS(err, "cannot list namespaced PolicyReports")
 		} else {
