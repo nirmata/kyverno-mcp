@@ -29,8 +29,8 @@ func ShowViolations(s *server.MCPServer) {
 		mcp.NewTool(
 			"show_violations",
 			mcp.WithDescription(`This tool is used when Kyverno is installed in the cluster. It returns all non-passing Kyverno PolicyReport results for a workload.`),
-			mcp.WithString("namespace", mcp.Description(`Namespace (default: default)`), mcp.DefaultString("default")),
-			mcp.WithString("namespace_exclude", mcp.Description(`Comma-separated namespaces to exclude (default: kube-system,kyverno)`), mcp.DefaultString("kube-system,kyverno")),
+			mcp.WithString("namespace", mcp.Description(`Namespace to query (default: default, use "all" for all namespaces)`), mcp.DefaultString("default")),
+			mcp.WithString("namespace_exclude", mcp.Description(`Comma-separated namespaces to exclude when namespace="all" (default: kube-system,kyverno)`), mcp.DefaultString("kube-system,kyverno")),
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			ns, _ := req.RequireString("namespace")
@@ -85,16 +85,24 @@ func gatherViolationsJSON(ctx context.Context, ns, nsExclude string) ([]byte, er
 		ns = "default"
 	}
 
-	excludeSet := common.ParseNamespaceExcludes(nsExclude)
+	// Determine if we should apply namespace exclude filtering
+	// Only apply exclude filtering when querying "all" namespaces
+	queryAllNamespaces := ns == "all"
+	var excludeSet map[string]struct{}
+	if queryAllNamespaces {
+		excludeSet = common.ParseNamespaceExcludes(nsExclude)
+	}
 
 	var allResults []policyreportv1alpha2.PolicyReportResult
 
 	// Helper function to process PolicyReport items
-	addResults := func(items []unstructured.Unstructured) error {
+	addPolicyReportResults := func(items []unstructured.Unstructured) error {
 		for _, u := range items {
-			// Skip if namespace is excluded
-			if _, skip := excludeSet[u.GetNamespace()]; skip {
-				continue
+			// Skip if namespace is excluded (only when querying all namespaces)
+			if queryAllNamespaces {
+				if _, skip := excludeSet[u.GetNamespace()]; skip {
+					continue
+				}
 			}
 
 			// Convert unstructured to typed PolicyReport
@@ -104,13 +112,12 @@ func gatherViolationsJSON(ctx context.Context, ns, nsExclude string) ([]byte, er
 				continue
 			}
 
-			// Skip reports with no failures or errors
-			if pr.Summary.Fail == 0 && pr.Summary.Error == 0 {
+			// Skip reports with no failures, errors, or warnings
+			if pr.Summary.Fail == 0 && pr.Summary.Error == 0 && pr.Summary.Warn == 0 {
 				continue
 			}
 
-			// Convert PolicyReport results to our format using Kyverno's helper
-			// We pass each result as a pseudo EngineResponse to leverage the existing BuildPolicyReportResults logic
+			// Extract relevant results from PolicyReport
 			for _, result := range pr.Results {
 				// Only include fail, error, and warn results
 				if result.Result != policyreportv1alpha2.StatusFail &&
@@ -119,8 +126,36 @@ func gatherViolationsJSON(ctx context.Context, ns, nsExclude string) ([]byte, er
 					continue
 				}
 
-				// For each result, create a simplified structure that matches what BuildPolicyReportResults expects
-				// Since we're reading from existing PolicyReports, we'll just copy the result directly
+				allResults = append(allResults, result)
+			}
+		}
+		return nil
+	}
+
+	// Helper function to process ClusterPolicyReport items
+	addClusterPolicyReportResults := func(items []unstructured.Unstructured) error {
+		for _, u := range items {
+			// Convert unstructured to typed ClusterPolicyReport
+			var cpr policyreportv1alpha2.ClusterPolicyReport
+			if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &cpr); err != nil {
+				klog.ErrorS(err, "failed to convert to ClusterPolicyReport", "name", u.GetName())
+				continue
+			}
+
+			// Skip reports with no failures, errors, or warnings
+			if cpr.Summary.Fail == 0 && cpr.Summary.Error == 0 && cpr.Summary.Warn == 0 {
+				continue
+			}
+
+			// Extract relevant results from ClusterPolicyReport
+			for _, result := range cpr.Results {
+				// Only include fail, error, and warn results
+				if result.Result != policyreportv1alpha2.StatusFail &&
+					result.Result != policyreportv1alpha2.StatusError &&
+					result.Result != policyreportv1alpha2.StatusWarn {
+					continue
+				}
+
 				allResults = append(allResults, result)
 			}
 		}
@@ -131,11 +166,21 @@ func gatherViolationsJSON(ctx context.Context, ns, nsExclude string) ([]byte, er
 	// 1. Namespaced PolicyReports
 	// ---------------------------------------------------------------------
 	if polrGVR.Resource != "" {
-		prList, err := dyn.Resource(polrGVR).Namespace(ns).List(ctx, metav1.ListOptions{})
+		var prList *unstructured.UnstructuredList
+		var err error
+
+		if queryAllNamespaces {
+			// Query all namespaces
+			prList, err = dyn.Resource(polrGVR).List(ctx, metav1.ListOptions{})
+		} else {
+			// Query specific namespace
+			prList, err = dyn.Resource(polrGVR).Namespace(ns).List(ctx, metav1.ListOptions{})
+		}
+
 		if err != nil {
 			klog.ErrorS(err, "cannot list namespaced PolicyReports")
 		} else {
-			if err := addResults(prList.Items); err != nil {
+			if err := addPolicyReportResults(prList.Items); err != nil {
 				return nil, err
 			}
 		}
@@ -149,7 +194,7 @@ func gatherViolationsJSON(ctx context.Context, ns, nsExclude string) ([]byte, er
 		if err != nil {
 			klog.ErrorS(err, "cannot list ClusterPolicyReports")
 		} else {
-			if err := addResults(cprList.Items); err != nil {
+			if err := addClusterPolicyReportResults(cprList.Items); err != nil {
 				return nil, err
 			}
 		}
