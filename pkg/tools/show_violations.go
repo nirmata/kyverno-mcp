@@ -124,7 +124,7 @@ func gatherViolationsJSON(ctx context.Context, ns string) ([]byte, error) {
 }
 
 // filterFailingReports inspects each PolicyReport / ClusterPolicyReport item and, if it
-// contains failing summaries, appends a simplified representation to out.
+// contains failing summaries, appends a simplified representation to out. The output is optimized for LLM consumption.
 func filterFailingReports(items []unstructured.Unstructured, out *[]map[string]interface{}) error {
 	for _, item := range items {
 		obj := item.Object
