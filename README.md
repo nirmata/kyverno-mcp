@@ -143,7 +143,7 @@ Switch to a different Kubernetes context.
 
 ### 3. Apply Policies
 
-Scan cluster resources for violations using curated Kyverno policy sets (embedded), Git repositories, or local policy files.
+Scan cluster resources for violations using default Kyverno policy sets, policies in Git repositories, or local policy files.
 
 
 **Parameters:**
