@@ -90,7 +90,7 @@ func gatherViolationsJSON(ctx context.Context, ns, nsExclude string) ([]byte, er
 	var allResults []policyreportv1alpha2.PolicyReportResult
 
 	// Helper function to process PolicyReport items
-	addResults := func(items []unstructured.Unstructured) error {
+	addPolicyReportResults := func(items []unstructured.Unstructured) error {
 		for _, u := range items {
 			// Skip if namespace is excluded
 			if _, skip := excludeSet[u.GetNamespace()]; skip {
@@ -104,13 +104,12 @@ func gatherViolationsJSON(ctx context.Context, ns, nsExclude string) ([]byte, er
 				continue
 			}
 
-			// Skip reports with no failures or errors
-			if pr.Summary.Fail == 0 && pr.Summary.Error == 0 {
+			// Skip reports with no failures, errors, or warnings
+			if pr.Summary.Fail == 0 && pr.Summary.Error == 0 && pr.Summary.Warn == 0 {
 				continue
 			}
 
-			// Convert PolicyReport results to our format using Kyverno's helper
-			// We pass each result as a pseudo EngineResponse to leverage the existing BuildPolicyReportResults logic
+			// Extract relevant results from PolicyReport
 			for _, result := range pr.Results {
 				// Only include fail, error, and warn results
 				if result.Result != policyreportv1alpha2.StatusFail &&
@@ -119,8 +118,36 @@ func gatherViolationsJSON(ctx context.Context, ns, nsExclude string) ([]byte, er
 					continue
 				}
 
-				// For each result, create a simplified structure that matches what BuildPolicyReportResults expects
-				// Since we're reading from existing PolicyReports, we'll just copy the result directly
+				allResults = append(allResults, result)
+			}
+		}
+		return nil
+	}
+
+	// Helper function to process ClusterPolicyReport items
+	addClusterPolicyReportResults := func(items []unstructured.Unstructured) error {
+		for _, u := range items {
+			// Convert unstructured to typed ClusterPolicyReport
+			var cpr policyreportv1alpha2.ClusterPolicyReport
+			if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &cpr); err != nil {
+				klog.ErrorS(err, "failed to convert to ClusterPolicyReport", "name", u.GetName())
+				continue
+			}
+
+			// Skip reports with no failures, errors, or warnings
+			if cpr.Summary.Fail == 0 && cpr.Summary.Error == 0 && cpr.Summary.Warn == 0 {
+				continue
+			}
+
+			// Extract relevant results from ClusterPolicyReport
+			for _, result := range cpr.Results {
+				// Only include fail, error, and warn results
+				if result.Result != policyreportv1alpha2.StatusFail &&
+					result.Result != policyreportv1alpha2.StatusError &&
+					result.Result != policyreportv1alpha2.StatusWarn {
+					continue
+				}
+
 				allResults = append(allResults, result)
 			}
 		}
@@ -135,7 +162,7 @@ func gatherViolationsJSON(ctx context.Context, ns, nsExclude string) ([]byte, er
 		if err != nil {
 			klog.ErrorS(err, "cannot list namespaced PolicyReports")
 		} else {
-			if err := addResults(prList.Items); err != nil {
+			if err := addPolicyReportResults(prList.Items); err != nil {
 				return nil, err
 			}
 		}
@@ -149,7 +176,7 @@ func gatherViolationsJSON(ctx context.Context, ns, nsExclude string) ([]byte, er
 		if err != nil {
 			klog.ErrorS(err, "cannot list ClusterPolicyReports")
 		} else {
-			if err := addResults(cprList.Items); err != nil {
+			if err := addClusterPolicyReportResults(cprList.Items); err != nil {
 				return nil, err
 			}
 		}
