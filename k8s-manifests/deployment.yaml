@@ -35,10 +35,8 @@ spec:
               cpu: "100m"
               memory: "128Mi"
           livenessProbe:
-            httpGet:
-              path: /mcp
+            tcpSocket:
               port: 8000
-              scheme: HTTPS
             initialDelaySeconds: 10
             periodSeconds: 30
           volumeMounts:

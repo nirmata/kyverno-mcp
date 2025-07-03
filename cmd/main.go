@@ -136,13 +136,19 @@ func main() {
 		// Create the streamable HTTP handler backed by our MCP server
 		streamSrv := server.NewStreamableHTTPServer(s)
 
+		// Default to a secure non-privileged port if no address is specified
+		addr := httpAddr
+		if addr == "" {
+			addr = ":8443"
+		}
+
 		// net/http server configuration (HTTPS)
 		httpServer := &http.Server{
-			Addr:    httpAddr,
+			Addr:    addr,
 			Handler: streamSrv,
 		}
 
-		klog.InfoS("Starting Streamable HTTPS server", "addr", httpAddr, "tlsCert", tlsCert, "tlsKey", tlsKey)
+		klog.InfoS("Starting Streamable HTTPS server", "addr", addr, "tlsCert", tlsCert, "tlsKey", tlsKey)
 
 		// Run the server in a goroutine so that the main thread can continue to serve stdio
 		go func() {
@@ -150,6 +156,17 @@ func main() {
 				klog.ErrorS(err, "Streamable HTTPS server terminated with error")
 			}
 		}()
+
+		// ------------------------------------------------------------------
+		// Block main goroutine until an OS termination signal is received.
+		// ------------------------------------------------------------------
+		stopCh := make(chan os.Signal, 1)
+		signal.Notify(stopCh, syscall.SIGINT, syscall.SIGTERM)
+
+		klog.Info("Server started. Waiting for termination signal...")
+		<-stopCh
+
+		klog.Info("Termination signal received. Exiting.")
 	} else if httpAddr != "" {
 		// Create the streamable HTTP handler backed by our MCP server
 		streamSrv := server.NewStreamableHTTPServer(s)
@@ -168,24 +185,23 @@ func main() {
 				klog.ErrorS(err, "Streamable HTTP server terminated with error")
 			}
 		}()
+
+		// ------------------------------------------------------------------
+		// Block main goroutine until an OS termination signal is received.
+		// ------------------------------------------------------------------
+		stopCh := make(chan os.Signal, 1)
+		signal.Notify(stopCh, syscall.SIGINT, syscall.SIGTERM)
+
+		klog.Info("Server started. Waiting for termination signal...")
+		<-stopCh
+
+		klog.Info("Termination signal received. Exiting.")
 	} else {
-		// Start the MCP server on stdio in its own goroutine
+		// Start the MCP server on stdio - this should block and exit naturally
 		klog.Info("Starting MCP server on stdio...")
-		go func() {
-			if err := server.ServeStdio(s); err != nil {
-				klog.ErrorS(err, "error in MCP stdio server")
-			}
-		}()
+		if err := server.ServeStdio(s); err != nil {
+			klog.ErrorS(err, "error in MCP stdio server")
+		}
+		klog.Info("MCP stdio server terminated.")
 	}
-
-	// ------------------------------------------------------------------
-	// Block main goroutine until an OS termination signal is received.
-	// ------------------------------------------------------------------
-	stopCh := make(chan os.Signal, 1)
-	signal.Notify(stopCh, syscall.SIGINT, syscall.SIGTERM)
-
-	klog.Info("Server started. Waiting for termination signal...")
-	<-stopCh
-
-	klog.Info("Termination signal received. Exiting.")
 }
