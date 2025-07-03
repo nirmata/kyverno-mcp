@@ -4,6 +4,7 @@ metadata:
   name: kyverno-mcp
   labels:
     app: kyverno-mcp
+    app.kubernetes.io/name: kyverno-mcp
 spec:
   replicas: 1
   selector:
@@ -13,10 +14,27 @@ spec:
     metadata:
       labels:
         app: kyverno-mcp
+        app.kubernetes.io/name: kyverno-mcp
     spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app.kubernetes.io/name
+                  operator: In
+                  values:
+                  - kyverno-mcp
+              topologyKey: kubernetes.io/hostname
+      automountServiceAccountToken: false
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: kyverno-mcp
-          image: ghcr.io/nirmata/kyverno-mcp:v0.1.0-rc.7
+          image: ghcr.io/nirmata/kyverno-mcp:v0.1.0
           args:
             - --http-addr
             - :8000
@@ -29,11 +47,20 @@ spec:
             - containerPort: 8000
           resources:
             limits:
-              cpu: "500m"
               memory: "256Mi"
             requests:
               cpu: "100m"
               memory: "128Mi"
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            runAsUser: 65534
+            capabilities:
+              drop:
+              - ALL
+            seccompProfile:
+              type: RuntimeDefault
           livenessProbe:
             tcpSocket:
               port: 8000
