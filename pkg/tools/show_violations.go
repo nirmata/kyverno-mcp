@@ -45,9 +45,6 @@ func ShowViolations(s *server.MCPServer) {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
 
-			if len(violationsJSON) == 0 {
-				return mcp.NewToolResultText("[]"), nil
-			}
 			return mcp.NewToolResultText(string(violationsJSON)), nil
 		})
 }
