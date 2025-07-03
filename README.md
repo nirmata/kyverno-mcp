@@ -237,7 +237,7 @@ If Kyverno is not installed in the active cluster, this tool instead returns a s
 }
 ```
 
-### 4. Kyverno Documentation Help
+### 5. Kyverno Documentation Help
 
 Retrieve official Kyverno documentation snippets directly from the server. Useful for quick reference on installation steps or troubleshooting guidance without leaving your chat client.
 
