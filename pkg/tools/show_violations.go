@@ -6,16 +6,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"kyverno-mcp/pkg/common"
 
+	policyreportv1alpha2 "github.com/kyverno/kyverno/api/policyreport/v1alpha2"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
 )
 
@@ -29,6 +30,7 @@ func ShowViolations(s *server.MCPServer) {
 			"show_violations",
 			mcp.WithDescription(`This tool is used when Kyverno is installed in the cluster. It returns all non-passing Kyverno PolicyReport results for a workload.`),
 			mcp.WithString("namespace", mcp.Description(`Namespace (default: default)`), mcp.DefaultString("default")),
+			mcp.WithString("namespace_exclude", mcp.Description(`Comma-separated namespaces to exclude (default: kube-system,kyverno)`), mcp.DefaultString("kube-system,kyverno")),
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			ns, _ := req.RequireString("namespace")
@@ -36,7 +38,12 @@ func ShowViolations(s *server.MCPServer) {
 				ns = "default"
 			}
 
-			violationsJSON, err := gatherViolationsJSON(ctx, ns)
+			nsExclude, _ := req.RequireString("namespace_exclude")
+			if nsExclude == "" {
+				nsExclude = "kube-system,kyverno"
+			}
+
+			violationsJSON, err := gatherViolationsJSON(ctx, ns, nsExclude)
 			if err != nil {
 				// If Kyverno (PolicyReport CRDs) is not installed, provide Helm installation instructions instead
 				if errors.Is(err, errNoPolicyReportCRD) {
@@ -50,18 +57,10 @@ func ShowViolations(s *server.MCPServer) {
 }
 
 // gatherViolationsJSON fetches PolicyReport and ClusterPolicyReport resources and returns a JSON
-// array containing only failing reports with relevant violation details.
-// The returned JSON format mirrors the structure produced by the following `kubectl` command:
-//
-//	kubectl get policyreports -n <ns> -o json | jq '.items[] | select(.summary.fail > 0) | {name: .metadata.name, resource: .scope, summary: .summary, violations: [.results[] | select(.result == "fail") | {policy: .policy, rule: .rule, message: .message, severity: .severity}]}'
-//
-// If the PolicyReport CRDs are not present it returns errNoPolicyReportCRD so the caller can
-// gracefully instruct the user to install Kyverno.
-func gatherViolationsJSON(ctx context.Context, ns string) ([]byte, error) {
-	cfg, err := rest.InClusterConfig()
-	if err != nil {
-		cfg, err = clientcmd.BuildConfigFromFlags("", clientcmd.RecommendedHomeFile)
-	}
+// array containing only failing and error reports with relevant violation details.
+// It uses Kyverno's BuildPolicyReportResults helper to convert PolicyReports into a consistent format.
+func gatherViolationsJSON(ctx context.Context, ns, nsExclude string) ([]byte, error) {
+	cfg, err := common.KubeConfig()
 	if err != nil {
 		return nil, fmt.Errorf("build kube-config: %w", err)
 	}
@@ -86,8 +85,47 @@ func gatherViolationsJSON(ctx context.Context, ns string) ([]byte, error) {
 		ns = "default"
 	}
 
-	// We will accumulate the filtered reports in this slice and marshal it to JSON at the end.
-	var failingReports []map[string]interface{}
+	excludeSet := common.ParseNamespaceExcludes(nsExclude)
+
+	var allResults []policyreportv1alpha2.PolicyReportResult
+
+	// Helper function to process PolicyReport items
+	addResults := func(items []unstructured.Unstructured) error {
+		for _, u := range items {
+			// Skip if namespace is excluded
+			if _, skip := excludeSet[u.GetNamespace()]; skip {
+				continue
+			}
+
+			// Convert unstructured to typed PolicyReport
+			var pr policyreportv1alpha2.PolicyReport
+			if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &pr); err != nil {
+				klog.ErrorS(err, "failed to convert to PolicyReport", "name", u.GetName(), "namespace", u.GetNamespace())
+				continue
+			}
+
+			// Skip reports with no failures or errors
+			if pr.Summary.Fail == 0 && pr.Summary.Error == 0 {
+				continue
+			}
+
+			// Convert PolicyReport results to our format using Kyverno's helper
+			// We pass each result as a pseudo EngineResponse to leverage the existing BuildPolicyReportResults logic
+			for _, result := range pr.Results {
+				// Only include fail, error, and warn results
+				if result.Result != policyreportv1alpha2.StatusFail &&
+					result.Result != policyreportv1alpha2.StatusError &&
+					result.Result != policyreportv1alpha2.StatusWarn {
+					continue
+				}
+
+				// For each result, create a simplified structure that matches what BuildPolicyReportResults expects
+				// Since we're reading from existing PolicyReports, we'll just copy the result directly
+				allResults = append(allResults, result)
+			}
+		}
+		return nil
+	}
 
 	// ---------------------------------------------------------------------
 	// 1. Namespaced PolicyReports
@@ -97,7 +135,7 @@ func gatherViolationsJSON(ctx context.Context, ns string) ([]byte, error) {
 		if err != nil {
 			klog.ErrorS(err, "cannot list namespaced PolicyReports")
 		} else {
-			if err := filterFailingReports(prList.Items, &failingReports); err != nil {
+			if err := addResults(prList.Items); err != nil {
 				return nil, err
 			}
 		}
@@ -111,83 +149,16 @@ func gatherViolationsJSON(ctx context.Context, ns string) ([]byte, error) {
 		if err != nil {
 			klog.ErrorS(err, "cannot list ClusterPolicyReports")
 		} else {
-			if err := filterFailingReports(cprList.Items, &failingReports); err != nil {
+			if err := addResults(cprList.Items); err != nil {
 				return nil, err
 			}
 		}
 	}
 
-	if len(failingReports) == 0 {
+	if len(allResults) == 0 {
 		return []byte("[]"), nil
 	}
-	return json.MarshalIndent(failingReports, "", "  ")
-}
-
-// filterFailingReports inspects each PolicyReport / ClusterPolicyReport item and, if it
-// contains failing summaries, appends a simplified representation to out. The output is optimized for LLM consumption.
-func filterFailingReports(items []unstructured.Unstructured, out *[]map[string]interface{}) error {
-	for _, item := range items {
-		obj := item.Object
-
-		// The Kyverno PolicyReport spec keeps summary at the top-level.
-		summary, ok := obj["summary"].(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		// Extract the fail count regardless of numeric type (int, int64, float64, json.Number).
-		if getInt(summary["fail"]) == 0 {
-			continue // skip reports with no failures
-		}
-
-		rep := map[string]interface{}{
-			"name":     item.GetName(),
-			"resource": obj["scope"],
-			"summary":  summary,
-		}
-
-		// Collect failing result details
-		resultsRaw, _ := obj["results"].([]interface{})
-		var violations []map[string]interface{}
-		for _, r := range resultsRaw {
-			rMap, ok := r.(map[string]interface{})
-			if !ok {
-				continue
-			}
-			if res, _ := rMap["result"].(string); res != "fail" {
-				continue
-			}
-			violations = append(violations, map[string]interface{}{
-				"policy":   rMap["policy"],
-				"rule":     rMap["rule"],
-				"message":  rMap["message"],
-				"severity": rMap["severity"],
-			})
-		}
-		rep["violations"] = violations
-
-		*out = append(*out, rep)
-	}
-	return nil
-}
-
-// getInt attempts to coerce various numeric representations into int.
-func getInt(v interface{}) int {
-	switch t := v.(type) {
-	case int:
-		return t
-	case int32:
-		return int(t)
-	case int64:
-		return int(t)
-	case float64:
-		return int(t)
-	case json.Number:
-		i, _ := t.Int64()
-		return int(i)
-	default:
-		return 0
-	}
+	return json.MarshalIndent(allResults, "", "  ")
 }
 
 // policyReportGVRs discovers policyreports / clusterpolicyreports
