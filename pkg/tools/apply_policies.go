@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"kyverno-mcp/pkg/common"
 	kyverno "kyverno-mcp/pkg/kyverno-cli"
 	"os"
 	"strings"
@@ -89,14 +90,7 @@ func applyPolicy(policyKey string, namespace string, gitBranch string, namespace
 	}
 
 	// Build a set of namespaces to exclude from the policy report results.
-	excludedNS := map[string]struct{}{}
-	for _, ns := range strings.Split(namespaceExclude, ",") {
-		ns = strings.TrimSpace(ns)
-		if ns == "" {
-			continue
-		}
-		excludedNS[ns] = struct{}{}
-	}
+	excludedNS := common.ParseNamespaceExcludes(namespaceExclude)
 
 	// Filter out engine responses that belong to excluded namespaces.
 	var filteredEngineResponses []engineapi.EngineResponse

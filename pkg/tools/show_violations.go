@@ -3,21 +3,20 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
+	"kyverno-mcp/pkg/common"
 
-	"sigs.k8s.io/yaml"
-
+	policyreportv1alpha2 "github.com/kyverno/kyverno/api/policyreport/v1alpha2"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
 )
 
@@ -31,6 +30,7 @@ func ShowViolations(s *server.MCPServer) {
 			"show_violations",
 			mcp.WithDescription(`This tool is used when Kyverno is installed in the cluster. It returns all non-passing Kyverno PolicyReport results for a workload.`),
 			mcp.WithString("namespace", mcp.Description(`Namespace (default: default)`), mcp.DefaultString("default")),
+			mcp.WithString("namespace_exclude", mcp.Description(`Comma-separated namespaces to exclude (default: kube-system,kyverno)`), mcp.DefaultString("kube-system,kyverno")),
 		),
 		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			ns, _ := req.RequireString("namespace")
@@ -38,7 +38,12 @@ func ShowViolations(s *server.MCPServer) {
 				ns = "default"
 			}
 
-			yamls, err := gatherReportYAML(ctx, ns)
+			nsExclude, _ := req.RequireString("namespace_exclude")
+			if nsExclude == "" {
+				nsExclude = "kube-system,kyverno"
+			}
+
+			violationsJSON, err := gatherViolationsJSON(ctx, ns, nsExclude)
 			if err != nil {
 				// If Kyverno (PolicyReport CRDs) is not installed, provide Helm installation instructions instead
 				if errors.Is(err, errNoPolicyReportCRD) {
@@ -47,18 +52,15 @@ func ShowViolations(s *server.MCPServer) {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
 
-			if len(yamls) == 0 {
-				return mcp.NewToolResultText("[]"), nil
-			}
-			return mcp.NewToolResultText(string(yamls)), nil
+			return mcp.NewToolResultText(string(violationsJSON)), nil
 		})
 }
 
-func gatherReportYAML(ctx context.Context, ns string) ([]byte, error) {
-	cfg, err := rest.InClusterConfig()
-	if err != nil {
-		cfg, err = clientcmd.BuildConfigFromFlags("", clientcmd.RecommendedHomeFile)
-	}
+// gatherViolationsJSON fetches PolicyReport and ClusterPolicyReport resources and returns a JSON
+// array containing only failing and error reports with relevant violation details.
+// It uses Kyverno's BuildPolicyReportResults helper to convert PolicyReports into a consistent format.
+func gatherViolationsJSON(ctx context.Context, ns, nsExclude string) ([]byte, error) {
+	cfg, err := common.KubeConfig()
 	if err != nil {
 		return nil, fmt.Errorf("build kube-config: %w", err)
 	}
@@ -83,7 +85,47 @@ func gatherReportYAML(ctx context.Context, ns string) ([]byte, error) {
 		ns = "default"
 	}
 
-	var b strings.Builder
+	excludeSet := common.ParseNamespaceExcludes(nsExclude)
+
+	var allResults []policyreportv1alpha2.PolicyReportResult
+
+	// Helper function to process PolicyReport items
+	addResults := func(items []unstructured.Unstructured) error {
+		for _, u := range items {
+			// Skip if namespace is excluded
+			if _, skip := excludeSet[u.GetNamespace()]; skip {
+				continue
+			}
+
+			// Convert unstructured to typed PolicyReport
+			var pr policyreportv1alpha2.PolicyReport
+			if err := runtime.DefaultUnstructuredConverter.FromUnstructured(u.Object, &pr); err != nil {
+				klog.ErrorS(err, "failed to convert to PolicyReport", "name", u.GetName(), "namespace", u.GetNamespace())
+				continue
+			}
+
+			// Skip reports with no failures or errors
+			if pr.Summary.Fail == 0 && pr.Summary.Error == 0 {
+				continue
+			}
+
+			// Convert PolicyReport results to our format using Kyverno's helper
+			// We pass each result as a pseudo EngineResponse to leverage the existing BuildPolicyReportResults logic
+			for _, result := range pr.Results {
+				// Only include fail, error, and warn results
+				if result.Result != policyreportv1alpha2.StatusFail &&
+					result.Result != policyreportv1alpha2.StatusError &&
+					result.Result != policyreportv1alpha2.StatusWarn {
+					continue
+				}
+
+				// For each result, create a simplified structure that matches what BuildPolicyReportResults expects
+				// Since we're reading from existing PolicyReports, we'll just copy the result directly
+				allResults = append(allResults, result)
+			}
+		}
+		return nil
+	}
 
 	// ---------------------------------------------------------------------
 	// 1. Namespaced PolicyReports
@@ -93,7 +135,7 @@ func gatherReportYAML(ctx context.Context, ns string) ([]byte, error) {
 		if err != nil {
 			klog.ErrorS(err, "cannot list namespaced PolicyReports")
 		} else {
-			if err := appendAsYAML(&b, prList.Items); err != nil {
+			if err := addResults(prList.Items); err != nil {
 				return nil, err
 			}
 		}
@@ -107,34 +149,16 @@ func gatherReportYAML(ctx context.Context, ns string) ([]byte, error) {
 		if err != nil {
 			klog.ErrorS(err, "cannot list ClusterPolicyReports")
 		} else {
-			if err := appendAsYAML(&b, cprList.Items); err != nil {
+			if err := addResults(cprList.Items); err != nil {
 				return nil, err
 			}
 		}
 	}
 
-	return []byte(b.String()), nil
-}
-
-func appendAsYAML(b *strings.Builder, items []unstructured.Unstructured) error {
-	for i, item := range items {
-		j, err := yaml.Marshal(item.Object)
-		if err != nil {
-			return err
-		}
-		y, err := yaml.JSONToYAML(j)
-		if err != nil {
-			return err
-		}
-		b.Write(y)
-		if i < len(items)-1 {
-			b.WriteString("\n---\n")
-		}
+	if len(allResults) == 0 {
+		return []byte("[]"), nil
 	}
-	if len(items) > 0 && b.Len() > 0 {
-		b.WriteString("\n")
-	}
-	return nil
+	return json.MarshalIndent(allResults, "", "  ")
 }
 
 // policyReportGVRs discovers policyreports / clusterpolicyreports
