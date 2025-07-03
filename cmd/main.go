@@ -197,11 +197,27 @@ func main() {
 
 		klog.Info("Termination signal received. Exiting.")
 	} else {
-		// Start the MCP server on stdio - this should block and exit naturally
+		// Start the MCP server on stdio in a separate goroutine to allow
+		// the main goroutine to listen for OS termination signals and
+		// perform graceful shutdown (SIGINT/SIGTERM).
 		klog.Info("Starting MCP server on stdio...")
-		if err := server.ServeStdio(s); err != nil {
-			klog.ErrorS(err, "error in MCP stdio server")
-		}
-		klog.Info("MCP stdio server terminated.")
+
+		go func() {
+			if err := server.ServeStdio(s); err != nil {
+				klog.ErrorS(err, "error in MCP stdio server")
+			}
+			klog.Info("MCP stdio server terminated.")
+		}()
+
+		// ------------------------------------------------------------------
+		// Block main goroutine until an OS termination signal is received.
+		// ------------------------------------------------------------------
+		stopCh := make(chan os.Signal, 1)
+		signal.Notify(stopCh, syscall.SIGINT, syscall.SIGTERM)
+
+		klog.Info("Server started. Waiting for termination signal...")
+		<-stopCh
+
+		klog.Info("Termination signal received. Exiting.")
 	}
 }
