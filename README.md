@@ -147,7 +147,7 @@ Scan cluster resources for violations using default Kyverno policy sets, policie
 
 
 **Parameters:**
-- `policySets` (string, optional): Policy set name (`pod-security`, `rbac-best-practices`, `kubernetes-best-practices`, `all`), or Git repository URLs, or file paths
+- `policySets` (string, optional): Policy set name (`pod-security`, `rbac-best-practices`, `kubernetes-best-practices`, `all`), or Git repository URLs, or local file paths
 - `namespace` (string, optional): Namespace to apply policies to (default: `default`)
 - `gitBranch` (string, optional): Branch to use when `policySets` is a Git repo URL (default: `main`)
 - `namespace_exclude` (string, optional): Comma-separated list of namespaces to exclude when collecting results (default: `kube-system,kyverno`)
