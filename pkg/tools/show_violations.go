@@ -156,7 +156,6 @@ func gatherViolationsJSON(ctx context.Context, ns, nsExclude string) ([]byte, er
 					continue
 				}
 
-
 				allResults = append(allResults, result)
 			}
 		}
