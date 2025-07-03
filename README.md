@@ -200,13 +200,14 @@ Switch to a different Kubernetes context.
 
 ### 3. Apply Policies
 
-Apply policies to cluster resources using curated Kyverno policy sets, Git repositories, or local filesystem.
+Scan cluster resources for violations using default Kyverno policy sets, policies in Git repositories, or local policy files.
 
 
 **Parameters:**
-- `policySets` (string, optional): Policy set name (`pod-security`, `rbac-best-practices`, `kubernetes-best-practices`, `all`), or Git repository URLs, or file paths
+- `policySets` (string, optional): Policy set name (`pod-security`, `rbac-best-practices`, `kubernetes-best-practices`, `all`), or Git repository URLs, or local file paths
 - `namespace` (string, optional): Namespace to apply policies to (default: `default`)
 - `gitBranch` (string, optional): Branch to use when `policySets` is a Git repo URL (default: `main`)
+- `namespace_exclude` (string, optional): Comma-separated list of namespaces to exclude when collecting results (default: `kube-system,kyverno`)
 
 **Example Request:**
 ```json
@@ -214,7 +215,8 @@ Apply policies to cluster resources using curated Kyverno policy sets, Git repos
   "tool": "apply_policies",
   "policySets": "all",
   "namespace": "default",
-  "gitBranch": "main"
+  "gitBranch": "main",
+  "namespace_exclude": "kube-system,kyverno"
 }
 ```
 
