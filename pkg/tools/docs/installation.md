@@ -88,7 +88,7 @@ If you choose to *not* exclude Kyverno or system Namespaces/objects and intend t
 
 ## Installing Kyverno Policy Sets via Helm
 
-After installing Kyverno, you can deploy predefined policy sets that implement security and best practice standards. Kyverno provides several curated policy sets available through Helm charts.
+After installing Kyverno, you can deploy predefined policy sets that implement security and best practice standards. Kyverno provides a comprehensive policy chart that allows you to enable specific policy categories through configuration.
 
 ### Prerequisites
 
@@ -107,141 +107,17 @@ helm repo add kyverno https://kyverno.github.io/kyverno/
 helm repo update
 ```
 
-### 1. Pod Security Standards
+### Policy Installation Options
 
-The Pod Security Standards policy set implements the Kubernetes Pod Security Standards using Kyverno policies. This includes both **Baseline** and **Restricted** security profiles.
+The `kyverno/kyverno-policies` Helm chart provides a comprehensive set of policies that can be selectively enabled. You have two main approaches:
 
-**Features:**
-- Baseline security controls (prevents most privileged escalations)
-- Restricted security controls (heavily restricted, following pod hardening best practices)
-- Host namespace restrictions
-- Capability dropping requirements
-- Security context validation
+#### Option 1: Single Installation with All Policies (Recommended)
 
-**Installation:**
+Install all policy sets in a single Helm release with selective policy enablement:
 
 ```bash
-# Install the complete Pod Security Standards policy set
-helm install pod-security-policies kyverno/kyverno-policies -n kyverno
-```
-
-**Custom Installation:**
-```bash
-# Install with custom values for specific security level
-helm install pod-security-policies kyverno/kyverno-policies \
-  -n kyverno \
-  --set podSecurityStandard=restricted \
-  --set validationFailureAction=enforce
-```
-
-**Verification:**
-```bash
-# Check deployed policies
-kubectl get clusterpolicy | grep pod-security
-
-# View policy details
-kubectl describe clusterpolicy podsecurity-subrule-baseline
-kubectl describe clusterpolicy podsecurity-subrule-restricted
-```
-
-### 2. RBAC Best Practices
-
-The RBAC Best Practices policy set enforces security controls around Role-Based Access Control (RBAC) resources.
-
-**Features:**
-- Prevents overly permissive RBAC bindings
-- Validates service account security configurations
-- Enforces least privilege access principles
-- Restricts dangerous RBAC combinations
-
-**Installation:**
-
-```bash
-# Install RBAC best practices policies
-helm install rbac-policies kyverno/kyverno-policies \
-  -n kyverno \
-  --set policies.require-rbac-best-practices.enabled=true \
-  --set policies.disallow-rbac-on-default-serviceaccounts.enabled=true
-```
-
-**Alternative installation using Nirmata curated policies:**
-```bash
-# Add Nirmata policy repository (contains additional RBAC policies)
-helm repo add nirmata https://nirmata.github.io/kyverno-policies/
-
-# Install RBAC best practices
-helm install rbac-best-practices nirmata/rbac-best-practices -n kyverno
-```
-
-### 3. Kubernetes Best Practices
-
-The Kubernetes Best Practices policy set includes general operational and security best practices for Kubernetes workloads.
-
-**Features:**
-- Resource limits and requests enforcement
-- Required labels and annotations
-- Image security (prevent latest tags, require specific registries)
-- Service security (restrict NodePort, LoadBalancer services)
-- Network policies and pod networking controls
-- Configuration best practices
-
-**Installation:**
-
-```bash
-# Install Kubernetes best practices policies
-helm install k8s-best-practices kyverno/kyverno-policies \
-  -n kyverno \
-  --set policies.require-labels.enabled=true \
-  --set policies.require-cpu-limit.enabled=true \
-  --set policies.require-memory-limit.enabled=true \
-  --set policies.disallow-latest-tag.enabled=true \
-  --set policies.disallow-nodeport-services.enabled=true
-```
-
-**Installation with custom configuration:**
-```bash
-# Create custom values file
-cat > k8s-best-practices-values.yaml << EOF
-policies:
-  require-labels:
-    enabled: true
-    parameters:
-      require:
-        - "app.kubernetes.io/name"
-        - "app.kubernetes.io/instance"
-        - "app.kubernetes.io/version"
-  
-  require-cpu-limit:
-    enabled: true
-    parameters:
-      require: ["<4"]
-  
-  require-memory-limit:
-    enabled: true
-    parameters:
-      require: ["<8Gi"]
-  
-  disallow-image-tags:
-    enabled: true
-    parameters:
-      disallow: ["latest", "main", "master"]
-
-validationFailureAction: "Audit"  # Change to "Enforce" for production
-EOF
-
-# Install with custom values
-helm install k8s-best-practices kyverno/kyverno-policies \
-  -n kyverno \
-  -f k8s-best-practices-values.yaml
-```
-
-### Installing All Three Policy Sets
-
-To install all three policy sets together:
-
-```bash
-# Install all policy sets with recommended configuration
-helm install kyverno-all-policies kyverno/kyverno-policies \
+# Install with comprehensive policy coverage
+helm install kyverno-policies kyverno/kyverno-policies \
   -n kyverno \
   --set policies.require-labels.enabled=true \
   --set policies.require-cpu-limit.enabled=true \
@@ -253,6 +129,120 @@ helm install kyverno-all-policies kyverno/kyverno-policies \
   --set policies.disallow-rbac-on-default-serviceaccounts.enabled=true \
   --set validationFailureAction=Audit
 ```
+
+#### Option 2: Targeted Policy Categories
+
+If you prefer to install specific policy categories only, you can use targeted configurations:
+
+**Pod Security Standards Only:**
+```bash
+# Install Pod Security Standards policies
+helm install kyverno-policies kyverno/kyverno-policies \
+  -n kyverno \
+  --set policies.disallow-privileged-containers.enabled=true \
+  --set policies.disallow-host-namespaces.enabled=true \
+  --set policies.require-drop-all-capabilities.enabled=true \
+  --set policies.require-run-as-non-root.enabled=true \
+  --set validationFailureAction=Audit
+```
+
+**RBAC Best Practices Only:**
+```bash
+# Install RBAC best practices policies
+helm install kyverno-policies kyverno/kyverno-policies \
+  -n kyverno \
+  --set policies.disallow-rbac-on-default-serviceaccounts.enabled=true \
+  --set policies.require-rbac-best-practices.enabled=true \
+  --set validationFailureAction=Audit
+```
+
+**Kubernetes Best Practices Only:**
+```bash
+# Install Kubernetes best practices policies
+helm install kyverno-policies kyverno/kyverno-policies \
+  -n kyverno \
+  --set policies.require-labels.enabled=true \
+  --set policies.require-cpu-limit.enabled=true \
+  --set policies.require-memory-limit.enabled=true \
+  --set policies.disallow-latest-tag.enabled=true \
+  --set policies.disallow-nodeport-services.enabled=true \
+  --set validationFailureAction=Audit
+```
+
+### Custom Configuration with Values File
+
+For more complex configurations, create a custom values file:
+
+```bash
+# Create custom values file
+cat > kyverno-policies-values.yaml << EOF
+# Pod Security Standards
+policies:
+  disallow-privileged-containers:
+    enabled: true
+  disallow-host-namespaces:
+    enabled: true
+  require-drop-all-capabilities:
+    enabled: true
+  require-run-as-non-root:
+    enabled: true
+  
+  # RBAC Best Practices
+  disallow-rbac-on-default-serviceaccounts:
+    enabled: true
+  require-rbac-best-practices:
+    enabled: true
+  
+  # Kubernetes Best Practices
+  require-labels:
+    enabled: true
+    parameters:
+      require:
+        - "app.kubernetes.io/name"
+        - "app.kubernetes.io/instance"
+  require-cpu-limit:
+    enabled: true
+  require-memory-limit:
+    enabled: true
+  disallow-latest-tag:
+    enabled: true
+  disallow-nodeport-services:
+    enabled: true
+
+# Global configuration
+validationFailureAction: "Audit"  # Change to "Enforce" for production
+EOF
+
+# Install with custom values
+helm install kyverno-policies kyverno/kyverno-policies \
+  -n kyverno \
+  -f kyverno-policies-values.yaml
+```
+
+### Policy Categories Available
+
+The `kyverno-policies` chart includes the following policy categories:
+
+**1. Pod Security Standards**
+- Baseline security controls (prevents most privileged escalations)
+- Restricted security controls (heavily restricted, following pod hardening best practices)
+- Host namespace restrictions
+- Capability dropping requirements
+- Security context validation
+
+**2. RBAC Best Practices**
+- Prevents overly permissive RBAC bindings
+- Validates service account security configurations
+- Enforces least privilege access principles
+- Restricts dangerous RBAC combinations
+
+**3. Kubernetes Best Practices**
+- Resource limits and requests enforcement
+- Required labels and annotations
+- Image security (prevent latest tags, require specific registries)
+- Service security (restrict NodePort, LoadBalancer services)
+- Network policies and pod networking controls
+- Configuration best practices
 
 ### Post-Installation Verification
 
@@ -271,6 +261,9 @@ kubectl describe clusterpolicy <policy-name>
 # Check for policy violations (if any exist)
 kubectl get policyreport -A
 kubectl get clusterpolicyreport
+
+# Verify Helm installation
+helm list -n kyverno
 ```
 
 ### Policy Set Management
@@ -281,16 +274,22 @@ kubectl get clusterpolicyreport
 helm repo update
 
 # Upgrade the policy sets
-helm upgrade kyverno-all-policies kyverno/kyverno-policies -n kyverno
+helm upgrade kyverno-policies kyverno/kyverno-policies -n kyverno
 ```
 
 **Uninstalling Policy Sets:**
 ```bash
-# Remove specific policy set
-helm uninstall pod-security-policies -n kyverno
+# Remove the policy installation
+helm uninstall kyverno-policies -n kyverno
+```
 
-# Remove all policies
-helm uninstall kyverno-all-policies -n kyverno
+**Modifying Policy Configuration:**
+```bash
+# Update existing installation with new policy settings
+helm upgrade kyverno-policies kyverno/kyverno-policies \
+  -n kyverno \
+  --set policies.new-policy.enabled=true \
+  --reuse-values
 ```
 
 ### Important Considerations
