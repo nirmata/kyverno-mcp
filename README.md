@@ -1,7 +1,5 @@
 # Kyverno MCP Server
 
-![License: AGPL-3.0](https://img.shields.io/badge/License-AGPLv3-blue.svg)
-
 <p class="callout info" style="font-size: 100%;">
 The Kyverno MCP Server is a [Model Context Protocol (MCP)](https://github.com/modelcontextprotocol) server that provides Kyverno policy management capabilities through a standardized interface. This server allows AI assistants to operate on Kubernetes clusters using Kyverno policies.
 </p>
