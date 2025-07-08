@@ -60,6 +60,18 @@ func ShowViolations(s *server.MCPServer) {
 // array containing only failing and error reports with relevant violation details.
 // It uses Kyverno's BuildPolicyReportResults helper to convert PolicyReports into a consistent format.
 func gatherViolationsJSON(ctx context.Context, ns, nsExclude string) ([]byte, error) {
+	// ViolationDetails represents a simplified, serializable policy violation.
+	type ViolationDetails struct {
+		Policy    string           `json:"policy"`
+		Rule      string           `json:"rule,omitempty"`
+		Message   string           `json:"message"`
+		Category  string           `json:"category,omitempty"`
+		Severity  string           `json:"severity,omitempty"`
+		Timestamp metav1.Timestamp `json:"timestamp,omitempty"`
+		Result    string           `json:"result"`
+		Resources []string         `json:"resources,omitempty"`
+	}
+
 	cfg, err := common.KubeConfig()
 	if err != nil {
 		return nil, fmt.Errorf("build kube-config: %w", err)
@@ -93,7 +105,7 @@ func gatherViolationsJSON(ctx context.Context, ns, nsExclude string) ([]byte, er
 		excludeSet = common.ParseNamespaceExcludes(nsExclude)
 	}
 
-	var allResults []policyreportv1alpha2.PolicyReportResult
+	var allViolations []ViolationDetails
 
 	// Helper function to process PolicyReport items
 	addPolicyReportResults := func(items []unstructured.Unstructured) error {
@@ -126,7 +138,28 @@ func gatherViolationsJSON(ctx context.Context, ns, nsExclude string) ([]byte, er
 					continue
 				}
 
-				allResults = append(allResults, result)
+				// Format resource identifiers
+				var resources []string
+				for _, r := range result.Resources {
+					var resourceIdentifier string
+					if r.Namespace != "" {
+						resourceIdentifier = fmt.Sprintf("%s/%s/%s", r.Kind, r.Namespace, r.Name)
+					} else {
+						resourceIdentifier = fmt.Sprintf("%s/%s", r.Kind, r.Name)
+					}
+					resources = append(resources, resourceIdentifier)
+				}
+
+				allViolations = append(allViolations, ViolationDetails{
+					Policy:    result.Policy,
+					Rule:      result.Rule,
+					Message:   result.Message,
+					Category:  result.Category,
+					Severity:  string(result.Severity),
+					Timestamp: result.Timestamp,
+					Result:    string(result.Result),
+					Resources: resources,
+				})
 			}
 		}
 		return nil
@@ -156,7 +189,28 @@ func gatherViolationsJSON(ctx context.Context, ns, nsExclude string) ([]byte, er
 					continue
 				}
 
-				allResults = append(allResults, result)
+				// Format resource identifiers
+				var resources []string
+				for _, r := range result.Resources {
+					var resourceIdentifier string
+					if r.Namespace != "" {
+						resourceIdentifier = fmt.Sprintf("%s/%s/%s", r.Kind, r.Namespace, r.Name)
+					} else {
+						resourceIdentifier = fmt.Sprintf("%s/%s", r.Kind, r.Name)
+					}
+					resources = append(resources, resourceIdentifier)
+				}
+
+				allViolations = append(allViolations, ViolationDetails{
+					Policy:    result.Policy,
+					Rule:      result.Rule,
+					Message:   result.Message,
+					Category:  result.Category,
+					Severity:  string(result.Severity),
+					Timestamp: result.Timestamp,
+					Result:    string(result.Result),
+					Resources: resources,
+				})
 			}
 		}
 		return nil
@@ -200,10 +254,10 @@ func gatherViolationsJSON(ctx context.Context, ns, nsExclude string) ([]byte, er
 		}
 	}
 
-	if len(allResults) == 0 {
+	if len(allViolations) == 0 {
 		return []byte("[]"), nil
 	}
-	return json.MarshalIndent(allResults, "", "  ")
+	return json.MarshalIndent(allViolations, "", "  ")
 }
 
 // policyReportGVRs discovers policyreports / clusterpolicyreports
