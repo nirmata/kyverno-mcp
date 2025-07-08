@@ -51,83 +51,8 @@ kubectl describe clusterpolicy podsecurity-subrule-baseline
 kubectl describe clusterpolicy podsecurity-subrule-restricted
 ```
 
-### 2. RBAC Best Practices
-
-**Installation:**
-
-```bash
-# Install RBAC best practices policies
-helm install rbac-policies kyverno/kyverno-policies \
-  -n kyverno \
-  --set policies.require-rbac-best-practices.enabled=true \
-  --set policies.disallow-rbac-on-default-serviceaccounts.enabled=true
-```
-
-### 3. Kubernetes Best Practices
-
-**Installation:**
-
-```bash
-# Install Kubernetes best practices policies
-helm install k8s-best-practices kyverno/kyverno-policies \
-  -n kyverno \
-  --set policies.require-labels.enabled=true \
-  --set policies.require-cpu-limit.enabled=true \
-  --set policies.require-memory-limit.enabled=true \
-  --set policies.disallow-latest-tag.enabled=true \
-  --set policies.disallow-nodeport-services.enabled=true
-```
-
-### 4. Installing All Three Policy Sets
-
-```bash
-# Install all policy sets with recommended configuration
-helm install kyverno-all-policies kyverno/kyverno-policies \
-  -n kyverno \
-  --set policies.require-labels.enabled=true \
-  --set policies.require-cpu-limit.enabled=true \
-  --set policies.require-memory-limit.enabled=true \
-  --set policies.disallow-latest-tag.enabled=true \
-  --set policies.disallow-privileged-containers.enabled=true \
-  --set policies.disallow-host-namespaces.enabled=true \
-  --set policies.require-drop-all-capabilities.enabled=true \
-  --set policies.disallow-rbac-on-default-serviceaccounts.enabled=true \
-  --set validationFailureAction=Audit
-```
-
-### 5. Post-Installation Verification
-
-```bash
-# List all cluster policies
-kubectl get clusterpolicy
-
-# Check policy status
-kubectl get clusterpolicy -o wide
-
-# View specific policy details
-kubectl describe clusterpolicy <policy-name>
-
-# Check for policy violations (if any exist)
-kubectl get policyreport -A
-kubectl get clusterpolicyreport
-```
-
-### 6. Policy Set Management
-
-#### Upgrading Policy Sets:
-```bash
-# Update the Helm repository
-helm repo update
-
-# Upgrade the policy sets
-helm upgrade kyverno-all-policies kyverno/kyverno-policies -n kyverno
-```
-
 #### Uninstalling Policy Sets:
 ```bash
 # Remove specific policy set
 helm uninstall pod-security-policies -n kyverno
-
-# Remove all policies
-helm uninstall kyverno-all-policies -n kyverno
 ```
