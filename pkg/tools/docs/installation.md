@@ -44,7 +44,7 @@ helm install pod-security-policies kyverno/kyverno-policies -n kyverno
 **Verification:**
 ```bash
 # Check deployed policies
-kubectl get clusterpolicy | grep pod-security
+kubectl get clusterpolicy
 
 # View policy details
 kubectl describe clusterpolicy podsecurity-subrule-baseline
