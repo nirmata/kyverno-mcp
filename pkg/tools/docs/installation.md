@@ -22,7 +22,7 @@ helm install kyverno kyverno/kyverno -n kyverno --create-namespace
 
 ## Installing Kyverno Policy Sets via Helm
 
-After installing Kyverno, you can deploy predefined policy sets that implement security and best practice standards. Kyverno provides several curated policy sets available through Helm charts.
+After installing Kyverno, you can deploy predefined policy sets that implement security and best practice standards. Kyverno provides a curated policy set for pod security standards available through Helm charts. Nirmata, the creators of Kyverno, provides additional policy sets for RBAC and Kubernetes best practices.
 
 ### Prerequisites
 
