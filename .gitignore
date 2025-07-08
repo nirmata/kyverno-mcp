@@ -6,3 +6,19 @@ kyverno-mcp
 .DS_Store
 
 .secrets
+
+# Development and configuration files
+.amazonq/
+mcp.json
+
+# Backup files
+*.bak
+*.backup
+README.bak.md
+
+# Certificate and key files
+*.crt
+*.cert
+*.key
+*.pem
+tls.*
