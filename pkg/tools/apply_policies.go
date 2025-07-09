@@ -5,10 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"kyverno-mcp/pkg/common"
-	kyverno "kyverno-mcp/pkg/kyverno-cli"
 	"os"
 	"strings"
+
+	"github.com/nirmata/kyverno-mcp/pkg/common"
+	kyverno "github.com/nirmata/kyverno-mcp/pkg/kyverno-cli"
 
 	// Add import for Kyverno engine API to filter responses
 	engineapi "github.com/kyverno/kyverno/pkg/engine/api"

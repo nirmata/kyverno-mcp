@@ -5,7 +5,7 @@ package main
 import (
 	"flag"
 	"fmt"
-	"kyverno-mcp/pkg/tools"
+	"github.com/nirmata/kyverno-mcp/pkg/tools"
 	"net/http"
 	"os"
 	"os/signal"
