@@ -1,4 +1,4 @@
-module kyverno-mcp
+module github.com/nirmata/kyverno-mcp
 
 go 1.24.1
 
