@@ -6,7 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"kyverno-mcp/pkg/common"
+
+	"github.com/nirmata/kyverno-mcp/pkg/common"
 
 	policyreportv1alpha2 "github.com/kyverno/kyverno/api/policyreport/v1alpha2"
 	"github.com/mark3labs/mcp-go/mcp"
