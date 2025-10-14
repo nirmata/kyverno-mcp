@@ -89,7 +89,7 @@ jobs:
     env:
       VERSION:  ${{ github.ref_name }}
       KO_PLATFORMS:   linux/amd64,linux/arm64
-      KO_DOCKER_REPO: ghcr.io/nirmata/kyverno-mcp
+      KO_DOCKER_REPO: ghcr.io/${{ github.repository }}/kyverno-mcp
     needs: goreleaser
     runs-on: blacksmith-2vcpu-ubuntu-2204
     permissions:
@@ -147,7 +147,7 @@ jobs:
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then
             TAG_NAME="${GITHUB_REF#refs/tags/}"
           fi
-          echo "tags=${GITHUB_SHA},${TAG_NAME}" >> $GITHUB_OUTPUT
+          echo "tags=${GITHUB_SHA},${TAG_NAME},latest" >> $GITHUB_OUTPUT
 
       - name: Publish image
         id: ko-push
