@@ -34,7 +34,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: kyverno-mcp
-          image: ghcr.io/nirmata/kyverno-mcp:v0.1.0
+          image: ghcr.io/nirmata/kyverno-mcp:v*.*.*
           args:
             - --http-addr
             - :8000
@@ -74,5 +74,3 @@ spec:
         - name: tls-certs
           secret:
             secretName: kyverno-mcp-tls
-      imagePullSecrets:
-         - name: nirmata-ghcr
